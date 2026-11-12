@@ -1,0 +1,39 @@
+<tool id="interactive_tool_inlineholo" tool_type="interactive" name="Inline electron holography" version="0.1.0" profile="22.05">
+    <description>focal-series reconstruction (TIE, FRWR3, ...), FRWR alignment, DIH strain, NXem export</description>
+    <requirements>
+        <!-- built from code/galaxy/Dockerfile and pushed to a registry -->
+        <container type="docker">ghcr.io/OWNER/inlineholo-web:0.1.0</container>
+    </requirements>
+    <entry_points>
+        <entry_point name="Inline holography app" requires_domain="True">
+            <port>8765</port>
+        </entry_point>
+    </entry_points>
+    <command><![CDATA[
+        mkdir -p ./data ./output &&
+        #for $f in $infiles:
+            ln -sf '$f' './data/${f.element_identifier}' &&
+        #end for
+        export INLINEHOLO_DATA="\$(pwd)/data" &&
+        export MPLBACKEND=Agg SOLARA_TELEMETRY_MIXPANEL_ENABLE=False &&
+        solara run /opt/inlineholo/webapp/solara_app.py --host 0.0.0.0 --port 8765 --production --no-open
+    ]]></command>
+    <inputs>
+        <param name="infiles" type="data" format="data" multiple="true" optional="true"
+               label="Focal series (NXem/NeXus, DM3/DM4, TIFF, .img frames, ...)"
+               help="Shown in tab 1 under 'file in data folder' and in the file browser; NOMAD uploads can also be read directly in tab 1."/>
+    </inputs>
+    <outputs>
+        <!-- every NXem file written in tabs 1, 4b and 6 (folder 'output') returns to the history when the tool is stopped -->
+        <collection name="results" type="list" label="${tool.name} results">
+            <discover_datasets pattern="(?P&lt;designation&gt;.+)\.nxs" directory="output" format="h5" visible="true"/>
+        </collection>
+    </outputs>
+    <tests>
+    </tests>
+    <help><![CDATA[
+Interactive web application for inline electron holography (focal-series exit-wave reconstruction).
+Select the focal series from your history, open the tool, process the data in the browser and stop the tool
+to get the NXem (.nxs) result files back into the history.
+    ]]></help>
+</tool>

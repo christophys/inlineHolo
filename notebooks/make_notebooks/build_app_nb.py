@@ -1,0 +1,51 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) 2026 Christoph T. Koch
+"""Generates notebooks/02_inline_holography_app.ipynb (Voila app)."""
+import nbformat as nbf
+
+nb = nbf.v4.new_notebook()
+nb["cells"] = [
+    nbf.v4.new_markdown_cell(
+        "# Inline electron holography — interactive focal-series reconstruction\n\n"
+        "Run in Jupyter or as a web app with **Voilà**:\n\n"
+        "```bash\nvoila 02_inline_holography_app.ipynb\n```\n\n"
+        "License: BSD 3-Clause (see `../LICENSE`), © 2008–2026 Christoph T. Koch.\n\n"
+        "Workflow: **1** load a focal series (NXem/NeXus, TIFF stack or several TIFFs, DM3/DM4, FRWR3/QSTEM .img frames "
+        "image_0.img, image_1.img, ..., a folder of single frames named by defocus, EMD, MRC, NPY) → "
+        "**2** check/edit the extracted parameters (pixel size, voltage, defoci, C3, astigmatism, coherence) → "
+        "**3** fit defocus and astigmatism (and C3) to the Thon rings → **4** align and pre-reconstruct (FRWR alignment with initial reconstruction) → **5** reconstruct / refine "
+        "(TIE, Fokker-Planck TIE, MFTIE, GF-TIE, PAM, Schiske, GS, IWFR, FRWR, MAL, Poisson-ML, ...) → **6** export "
+        "everything as NXem; **7** dark-field inline holography (DIH): strain / rotation (or displacement) maps from "
+        "the DF reconstructions of one or several reflections (port of the DM script *Many-Beam DIH-GPA*).\n\n"
+        "The export writes the focal series, all reconstructions of the session (exit waves, amplitude/phase, "
+        "incoherent background, diffusion field, refined FRWR3 parameters, convergence history), DIH strain maps and "
+        "half-set FRC curves into one NeXus file that complies with the NXem application definition and is checked "
+        "with the `pynxtools` validator (`pip install pynxtools pynxtools-em`). The metadata that NXem requires and "
+        "that only you know (sample elements and preparation date, microscope vendor/model, emitter type, "
+        "acquisition time; optionally user, ORCID, sample ID, DOI, ...) are entered in the *NXem metadata* fields "
+        "of tab 6 and can be saved and reloaded as a YAML file.\n\n"
+        "DM3/DM4 stacks (e.g. `stackExp.dm3`, `stackExpRaw.dm3` in `../data`) are read directly; large files are "
+        "best loaded by path, with the file browser of tab 1 or from the data-folder list (an uploaded file that "
+        "also exists on the computer running the app is read from there). After loading a non-NXem file, tab 1 offers its "
+        "conversion to NXem once the required metadata are filled in. Tab 4b aligns raw series with FRWR3 and gives an initial reconstruction at full resolution (storable as NXem and usable as start wave for the refinement in tab 5, where FRWR can then use all frames from the first loop), "
+        "including the defocus-dependent image rotation and magnification.\n\n"
+        "The defocus column of tab 2 can be filled with linear or non-linear series, "
+        "Δf_n = Δf_offset + step·sign(n − n0)·|n − n0|^m (Eq. 1 of the FRWR manual), and the series fit of tab 3 "
+        "can fit this model (with m fixed or fitted). Thon-ring fits, the FRWR3 alignment and the reconstruction "
+        "run in the background with progress information and can be stopped (a stopped reconstruction keeps the "
+        "current wave as its result).\n\n"
+        "FRWR is a port of the FRWR3 program; all FRWR3 settings can be entered (or loaded from a `.yaml` / frwr3 `.conf` file) "
+        "in the *FRWR3 settings* panel using the original key names, and the reconstruction runs on the GPU if available.\n\n"
+        "The simulated demo files in `../data` are created by `01_method_comparison.ipynb`."),
+    nbf.v4.new_code_cell(
+        "%matplotlib inline\n"
+        "import os, sys\n"
+        "sys.path.insert(0, os.path.abspath(os.path.join('..')))\n"
+        "import matplotlib.pyplot as plt\n"
+        "plt.rcParams.update({'font.size': 8, 'figure.dpi': 90})\n"
+        "from inlineholo.app import App\n"
+        "app = App(data_dir=os.path.abspath(os.path.join('..', 'data'))).display()"),
+]
+nb["metadata"]["kernelspec"] = {"name": "python3", "display_name": "Python 3", "language": "python"}
+nbf.write(nb, "../02_inline_holography_app.ipynb")
+print("written")

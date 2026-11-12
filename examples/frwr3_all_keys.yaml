@@ -1,0 +1,105 @@
+# FRWR3 / inlineholo configuration - all keys with defaults
+# keys are identical to the frwr3 control file; [inlineholo] marks extensions
+mode: FluxPreserving   # FluxPreserving (FRWR, default) | General (no envelope during defocus refinement)
+print level: 1   # 0 silent, 1 R-values, 2 + per-image info, 3 debug
+save level: 0   # >= 2 keeps wave snapshots (every 50 final loops) in memory; nothing is written to disk
+feedback parameter: 1.0   # amplitude/phase feedback beta (1 = full projection)
+high NA mode: 0   # 1: exact propagator 2 df sqrt(n^2-theta^2) (light optics)
+refractive Index: 1.0   # refractive index for high NA mode
+apply GF: 0   # 1: gradient flipping in the final loops (Ozsoy-Keskinbora 2022)
+GF flipping frequency: 2   # flip every N final loops
+GF beta: 0.95   # flipped gradients are multiplied by -beta
+GF signal fraction: 0.8   # target fraction of (small) gradient components that are flipped
+GF min signal fraction: 0.2   # lower limit when the fraction is adapted
+GF threshold: 0.02   # initial threshold (fraction of the max gradient), adapted automatically
+GF length scale (nm): 11.0   # flipped phase used below 1/length (Gaussian weight), original above
+GF order: 1   # 1 gradient, 2 second derivatives, 3 mixed
+GF adjust fraction: 1   # 1: reduce the signal fraction when R increases
+GF 3rd order fraction: 0.21   # fraction of flips done with order 3
+padding: 0.0   # wave is (1+padding) x ROI; data constraint only inside the ROI
+phase predict threshold: 0.0   # max phase update of the TIE phase prediction (0 = off)
+low intensity threshold: 1.0   # intensity floor for the division in the TIE phase prediction
+low resolution threshold: 0.02   # CTF value defining the low-frequency cut of the phase prediction
+shift trials: 1   # number of candidate positions tried in the initialisation
+max shift: 50   # search radius (px) for drift / wave-shift alignment (0 = no alignment)
+max shift global: 0   # (read but unused by frwr3)
+max defocus: 0.0   # planes with |df - df_ref| larger than this (nm) are excluded (0 = all)
+start frame: -1   # first frame used (-1 = 0)
+stop frame: -1   # last frame used (-1 = last)
+first frame: -1   # reference frame (-1: frame closest to focus)
+warping points X: 4   # grid of reference points (fit reference points)
+warping points Y: 4   # grid of reference points (fit reference points)
+fit distortions: 0   # 1: fit rotation/zoom/zoomX/zoomY/spiral/pincushion of each frame
+fit rotation: 1   # allow rotation fit
+fit magnification: 1   # allow magnification fit
+fit intensity scale: 0   # (read but unused by frwr3)
+keep central plane: 0   # re-read the reference plane only when >= this many planes are used
+fit defocus: 2   # 0 never, 1 final loops, 2 after the 3-loop, 3 in the 3-loop, 4 after the first 2-loop, 5 always
+enforce positive phase: 0   # 1: negative phases are damped
+allow phase wrapping: 0   # 1: phase is not unwrapped/accumulated
+fit incoherent background: [0, 0.1, 0.98]   # [flag, feedback, damping]
+MTF: [0, 0.5576, 4.6954, 0.3953, 476.918]   # [flag, aExp, wExp, aGauss, wGauss]: MTF = aG exp(-wG u^2) + aE exp(-wE u), u = q*dx
+apply MTF: null   # [flag, wGauss, wExp, ratio] (alternative format, see example .conf)
+fit alpha: [0, 7]   # [flag, min. number of planes]
+fit reference points: [0, 0]   # [flag, min. number of planes] (inlineholo: smooth displacement field)
+use TIE: 0   # 1: start from a TIE phase (doTIEGuess)
+TIE low resolution (nm): 500.0   # TIE low-frequency filter
+TIE high resolution (nm): 1.0   # TIE high-frequency filter
+TIE align loops: 2   # crude TIE alignment loops
+TIE re-align loops: 1   # TIE re-alignment loops
+TIE threshold: 1.0   # intensity floor for the TIE division
+enforce equal defocus steps: 0   # 1: defoci = central + j*step (defocus scale)
+defocus offset: null   # nm (with 'defocus step' when no list is given)
+defocus step: null   # nm
+defocus scale: null   # 1 linear, 2 quadratic, ... series
+bandpass filter low: 0.0   # low-frequency damping of the chi^2 alignment (Nyquist = 0.5)
+bandpass filter high: 0.3   # high-frequency damping of the chi^2 alignment
+exponent: 0.4   # 1 = chi^2; < 1 = exponent of the Fourier amplitude in the correlation
+chi2 weight: 1.0   # 1 chi^2, 0 cross correlation
+Nedge: 30   # edge (px) excluded in wave-shift alignment and TIE edge blending
+Nedge for smoothing: 30   # edge (px) blended to the mean before alignment
+intermediate loops: 9   # loops per stage of the progressive reconstruction
+final loops: 200   # loops with all planes
+residue loops: 40   # loops with residue accumulation (C++ default 40)
+init loops 2: 5   # loops of the 2-plane initialisation
+init loops 3: 3   # loops of the 3-plane initialisation
+phase predict loops: 0   # additional phase-prediction loops per stage
+distortion loops: 1   # repetitions of the distortion fit
+distortion magnitude: 12.0   # step (px at the frame edge) for the distortion fit
+distortion frequency: 50   # re-read/re-align every N loops
+smoothen phase: 0.0   # Gaussian smoothing (nm) of the phase at re-reads (0: aperture limit)
+smoothen amplitude: 0.0   # Gaussian smoothing (nm) of the amplitude at re-reads (0: aperture limit)
+alpha_mrad: null   # illumination semi-angle (1/e) in mrad; default sqrt(2) x params.convergence_rad
+zoomFactor_mm: [0.0, 0.0, 0.0]   # zoom per mm defocus [linear, quadratic, cubic]
+rot_rad_mm: [0.0, 0.0, 0.0]   # rotation (rad) per mm defocus
+zoomX_mm: [0.0, 0.0, 0.0]   # anisotropic zoom per mm defocus
+zoomY_mm: [0.0, 0.0, 0.0]   # anisotropic zoom per mm defocus
+spiral_mm: [0.0, 0.0, 0.0]   # spiral distortion (rad/kpixel) per mm defocus
+pincush_mm: [0.0, 0.0, 0.0]   # pincushion (1/kpixel) per mm defocus
+zoomFactor_mm range: 0.0   # allowed deviation of the fitted zoom from the polynomial (per mm)
+rot_rad_mm range: 0.0   # allowed deviation of the fitted rotation
+zoomX_mm range: 0.0   # allowed deviation
+zoomY_mm range: 0.0   # allowed deviation
+spiral_kpix_mm range: 0.0   # allowed deviation
+pincushion_kpix_mm range: 0.0   # allowed deviation
+defocus: null   # list of defoci (nm), one per frame (default: params.defoci_nm)
+rotation: null   # list: rotation per frame (rad)
+zoom: null   # list: zoom per frame
+zoomX: null   # list per frame
+zoomY: null   # list per frame
+spiral: null   # list per frame
+pincushion: null   # list per frame
+alpha: null   # list: alpha per frame (mrad)
+backend: auto   # [inlineholo] auto | numpy | cupy | torch (GPU if available)
+precision: auto   # [inlineholo] auto | float32 | float64
+aberrations: frwr3   # [inlineholo] frwr3 (C1, A1, C3 as in frwr3) | full (all aberrations of the parameters)
+focal spread envelope: 0   # [inlineholo] 1: temporal-coherence envelope on the wave (frwr3 ignores Delta)
+subpixel shifts: 0   # [inlineholo] 1: sub-pixel wave shifts (parabolic chi^2 peak + Fourier shift)
+initial wave: flat   # [inlineholo] flat | name of another inlineholo method used as start
+data normalized: 1   # [inlineholo] 1: no zoom^2 intensity scaling when warping
+objective aperture (mrad): null   # [inlineholo] objective aperture radius (default params.aperture_rad or none)
+objective aperture edge (mrad): 0.1   # [inlineholo] cosine edge of the aperture
+objective aperture offset X (mrad): 0.0   # [inlineholo]
+objective aperture offset Y (mrad): 0.0   # [inlineholo]
+roi: null   # [inlineholo] [top, left, bottom, right] in pixels of the full frames
+keep history: 1   # [inlineholo] keep the log/R-values in the result

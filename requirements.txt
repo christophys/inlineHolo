@@ -1,0 +1,21 @@
+numpy
+scipy
+h5py
+matplotlib
+scikit-image
+pandas
+tifffile
+ipywidgets>=8
+voila
+jupyter
+nbformat
+pyyaml
+# optional
+rosettasciio
+mrcfile
+pytest
+torch  # optional, MCNN and GPU back end
+# cupy-cuda12x  # optional GPU back end
+# NXem validation (optional)
+pynxtools>=0.16
+pynxtools-em>=0.4

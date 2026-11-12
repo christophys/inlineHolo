@@ -1,0 +1,163 @@
+Pixel size: (20.000 x 20.000) A
+Start defocus: 0.000 nm, Defocus step: 700.000 nm, 
+Astigmatism: 0 nm at -0.000000 deg
+First frame: -1
+*****************************************
+FRWR: Full Resolution Wave Reconstruction
+*****************************************
+Time and date: Sat Oct 17 20:40:54 2026
+
+
+
+Reconstruction parameters
+Wavelength:					0.019687 A
+Padding:                     yes (0.2)
+Max. phase prediction:       0.00
+Min. intensity level:        1.00
+phase predict low res.:      0.0200
+Data normalized:             yes
+Number of trial shifts:      1
+Maximum image shift:         0 pixels
+Fitting image rotation:      no
+Fitting image magnification: no
+Fitting alpha:               no (after 7 images)
+Fitting defocus:             no (0)
+Fitting reference points:    no (after 0 images)
+fit incoherent background:   yes (beta = 0.10, damp = 0.95)
+enforce positive phase:      no 
+Phase starting guess:        phase = 0
+Feedback parameter:          1.000
+Bandpass filter low:         0.000 (Nyquist = 0.5)
+Bandpass filter high:        0.300 (Nyquist = 0.5)
+Bandpass filter exponent:    0.400
+Use chi2 method:             1
+Apply MTF:                   yes
+MTF:                         0.000*exp(-0.000 k)+1.000*exp(-1.645 k^2)
+Print level:                 1
+Save level:                  0
+Frames:                      all frames
+
+********************************************
+Wave trial initialization
+Will use image 3 as reference image
+2-Loop 0 (3, 4): align=0, R-value=0.00382902
+2-Loop 1 (3, 4): align=0, R-value=0.000880771
+2-Loop 2 (3, 4): align=0, R-value=0.000860088
+2-Loop 3 (3, 4): align=0, R-value=0.000858293
+3-Loop 0 (3, 4, 2):  R-value=0.0014313
+3-Loop 1 (3, 4, 2):  R-value=0.00118455
+3-Loop 2 (3, 4, 2):  R-value=0.0011576
+3-Loop 3 (3, 4, 2):  R-value=0.00115336
+3-Loop 0 (3, 4, 5):  R-value=0.00218239
+3-Loop 1 (3, 4, 5):  R-value=0.00212632
+3-Loop 2 (3, 4, 5):  R-value=0.00213529
+3-Loop 3 (3, 4, 5):  R-value=0.00213361
+Initial planes: 3, 4 (shift=[8, 8]), 2 (shift=[8, 8]), R=0.001153, trial 1a
+Will continue with planes 2 and 4
+R-value after wave initialization: 0.0012
+Will read image 4
+3-Loop 0: align=1, R-value=0.00244034 
+3-Loop 1: align=0, R-value=0.0012485 
+3-Loop 2: align=0, R-value=0.00115723 
+3-Loop 3: align=1, R-value=0.0011438 
+3-Loop 4: align=0, R-value=0.00114065 
+3-Loop 5: align=0, R-value=0.00113933 
+Forced re-read of image 2
+Forced re-read of image 3
+Forced re-read of image 4
+Image 2: defocus: -300.0 nm, wave shift: (0, 0)
+Image 3: defocus: 0.0 nm, wave shift: (0, 0)
+Image 4: defocus: 300.0 nm, wave shift: (0, 0)
+Mean defocus step = 300.0nm
+5-Loop 0: align=1, R-value=0.00293583 
+5-Loop 1: align=0, R-value=0.00295371 
+5-Loop 2: align=0, R-value=0.00294691 
+5-Loop 3: align=1, R-value=0.00293909 
+5-Loop 4: align=0, R-value=0.00293214 
+5-Loop 5: align=0, R-value=0.00292635 
+Forced re-read of image 1
+Forced re-read of image 2
+Forced re-read of image 3
+Forced re-read of image 4
+Forced re-read of image 5
+Image 1: defocus: -1000.0 nm, wave shift: (0, 0)
+Image 2: defocus: -300.0 nm, wave shift: (0, 0)
+Image 3: defocus: 0.0 nm, wave shift: (0, 0)
+Image 4: defocus: 300.0 nm, wave shift: (0, 0)
+Image 5: defocus: 1000.0 nm, wave shift: (0, 0)
+Mean defocus step = 400.0nm
+Will read image 6
+7-Loop 0: align=1, R-value=0.00854037 
+7-Loop 1: align=0, R-value=0.00879812 
+7-Loop 2: align=0, R-value=0.00874309 
+7-Loop 3: align=1, R-value=0.00865845 
+7-Loop 4: align=0, R-value=0.0085723 
+7-Loop 5: align=0, R-value=0.00849047 
+Forced re-read of image 0
+Forced re-read of image 1
+Forced re-read of image 2
+Forced re-read of image 3
+Forced re-read of image 4
+Forced re-read of image 5
+Forced re-read of image 6
+Image 0: defocus: -4000.0 nm, wave shift: (0, 0)
+Image 1: defocus: -1000.0 nm, wave shift: (0, 0)
+Image 2: defocus: -300.0 nm, wave shift: (0, 0)
+Image 3: defocus: 0.0 nm, wave shift: (0, 0)
+Image 4: defocus: 300.0 nm, wave shift: (0, 0)
+Image 5: defocus: 1000.0 nm, wave shift: (0, 0)
+Image 6: defocus: 4000.0 nm, wave shift: (0, 0)
+Mean defocus step = 711.1nm
+GF: flipped 81.6 % (target = 70.0 %), order = 1, threshold = 0.0200 => 0.0136
+Sum of pixels from low-frequency: 113.097 14286.9
+Final Loop 0: align=1, R-value=0.00841312 
+Final Loop 1: align=0, R-value=0.00833999 
+Final Loop 2: align=0, R-value=0.00827118 
+Final Loop 3: align=0, R-value=0.00820555 
+GF: flipped 69.7 % (target = 70.0 %), order = 1, threshold = 0.0136 => 0.0136
+Sum of pixels from low-frequency: 113.097 14286.9
+Final Loop 4: align=0, R-value=0.00814305 
+Final Loop 5: align=0, R-value=0.00808379 
+Final Loop 6: align=0, R-value=0.00802756 
+Final Loop 7: align=0, R-value=0.00797401 
+GF: flipped 68.3 % (target = 70.0 %), order = 1, threshold = 0.0136 => 0.0138
+Sum of pixels from low-frequency: 113.097 14286.9
+Final Loop 8: align=0, R-value=0.00792326 
+Final Loop 9: align=0, R-value=0.00787451 
+Final Loop 10: align=0, R-value=0.00782813 
+Final Loop 11: align=0, R-value=0.00778365 
+GF: flipped 68.1 % (target = 70.0 %), order = 1, threshold = 0.0138 => 0.0140
+Sum of pixels from low-frequency: 113.097 14286.9
+Final Loop 12: align=0, R-value=0.00774077 
+Final Loop 13: align=0, R-value=0.00769932 
+Final Loop 14: align=0, R-value=0.00765952 
+Final Loop 15: align=0, R-value=0.00762086 
+GF: flipped 68.0 % (target = 70.0 %), order = 1, threshold = 0.0140 => 0.0142
+Sum of pixels from low-frequency: 113.097 14286.9
+Final Loop 16: align=0, R-value=0.00758334 
+Final Loop 17: align=0, R-value=0.0075469 
+Final Loop 18: align=0, R-value=0.00751148 
+Final Loop 19: align=0, R-value=0.00747727 
+GF: flipped 68.2 % (target = 70.0 %), order = 1, threshold = 0.0142 => 0.0144
+Sum of pixels from low-frequency: 113.097 14286.9
+Final Loop 20: align=0, R-value=0.00744408 
+Final Loop 21: align=0, R-value=0.00741166 
+Final Loop 22: align=0, R-value=0.00737999 
+Final Loop 23: align=0, R-value=0.0073493 
+GF: flipped 68.2 % (target = 70.0 %), order = 1, threshold = 0.0144 => 0.0146
+Sum of pixels from low-frequency: 113.097 14286.9
+Final Loop 24: align=0, R-value=0.00731942 
+Final Loop 25: align=0, R-value=0.00729027 
+Final Loop 26: align=0, R-value=0.00726191 
+Final Loop 27: align=0, R-value=0.00723441 
+GF: flipped 68.3 % (target = 70.0 %), order = 1, threshold = 0.0146 => 0.0148
+Sum of pixels from low-frequency: 113.097 14286.9
+Final Loop 28: align=0, R-value=0.0072076 
+Final Loop 29: align=0, R-value=0.0071815 
+Image 0: defocus: -4000.0 nm, wave shift: (0, 0), alpha: 0.071mrad
+Image 1: defocus: -1000.0 nm, wave shift: (0, 0), alpha: 0.071mrad
+Image 2: defocus: -300.0 nm, wave shift: (0, 0), alpha: 0.071mrad
+Image 3: defocus: 0.0 nm, wave shift: (0, 0), alpha: 0.071mrad
+Image 4: defocus: 300.0 nm, wave shift: (0, 0), alpha: 0.071mrad
+Image 5: defocus: 1000.0 nm, wave shift: (0, 0), alpha: 0.071mrad
+Image 6: defocus: 4000.0 nm, wave shift: (0, 0), alpha: 0.071mrad
