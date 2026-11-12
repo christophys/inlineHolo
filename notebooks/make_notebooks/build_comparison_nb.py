@@ -115,17 +115,19 @@ def series_transfer(p, shape):
     q = g.q[0, : shape[1]//2]
     return q, a11[0, : shape[1]//2], det[0, : shape[1]//2], np.stack([np.sin(np.angle(np.conj(t))) * np.abs(t) for t in T])[:, 0, : shape[1]//2]
 
-fig, ax = plt.subplots(1, 2, figsize=(7, 2.6))
-for a, p, name in ((ax[0], p_hr, "HR"), (ax[1], p_mr, "MR")):
-    q, s, det, pctf = series_transfer(p, (N, N))
-    for k in range(0, p.n_images, max(1, p.n_images // 5)):
-        a.plot(q[1:], pctf[k, 1:], lw=0.5, alpha=0.6)
-    a.plot(q[1:], s[1:], "k", lw=1.5, label=r"$\langle|T_n|^2\rangle_n$")
-    a.plot(q[1:], det[1:], "r--", lw=1.2, label="twin separability")
-    a.set_xscale("log"); a.set_xlabel(r"$q$ (nm$^{-1}$)"); a.set_title(f"{name}: PCTFs (thin) and series transfer")
-    a.set_ylim(-1.05, 1.05)
-ax[0].legend(loc="lower left", fontsize=7)
-fig.tight_layout(); fig.savefig(os.path.join(FIG, "fig_transfer.pdf")); plt.show()
+transfer = {name: (p, series_transfer(p, (N, N))) for p, name in ((p_hr, "HR"), (p_mr, "MR"))}
+for xscale, fn in (("log", "fig_transfer.pdf"), ("linear", "fig_transfer_linq.pdf")):   # logarithmic and linear q axis
+    fig, ax = plt.subplots(1, 2, figsize=(7, 2.6))
+    for a, (name, (p, (q, s, det, pctf))) in zip(ax, transfer.items()):
+        for k in range(0, p.n_images, max(1, p.n_images // 5)):
+            a.plot(q[1:], pctf[k, 1:], lw=0.5, alpha=0.6)
+        a.plot(q[1:], s[1:], "k", lw=1.5, label=r"$\langle|T_n|^2\rangle_n$")
+        a.plot(q[1:], det[1:], "r--", lw=1.2, label="twin separability")
+        a.set_xscale(xscale); a.set_xlabel(r"$q$ (nm$^{-1}$)"); a.set_title(f"{name}: PCTFs (thin) and series transfer")
+        a.set_ylim(-1.05, 1.05)
+        if xscale == "linear": a.set_xlim(0, q[-1])
+    ax[0].legend(loc="lower left", fontsize=7)
+    fig.tight_layout(); fig.savefig(os.path.join(FIG, fn)); plt.show()
 """)
 
 code(r"""
@@ -314,20 +316,22 @@ show_recs("mr", cmap="twilight", wrap=True, fn="fig_recs_mr.pdf")
 """)
 
 code(r"""
-fig, ax = plt.subplots(1, 2, figsize=(7.2, 3.4))
 styles = ["-", "--", "-.", ":"]
 COL = plt.cm.tab20(np.linspace(0, 1, 20))
 MARK = "osd^v<>ph*XPDH8"
-for a, ds in zip(ax, ("hr", "mr")):
-    for k, (lab, (r, c)) in enumerate(ref[ds].items()):
-        a.plot(c["q"][1:], c["frc"][1:], styles[k % 4], color=COL[k % 20], lw=1, label=lab)
-    a.axhline(0.5, color="k", lw=0.5)
-    a.set_xscale("log"); a.set_ylim(-0.2, 1.02)
-    a.set_xlabel(r"$q$ (nm$^{-1}$)"); a.set_ylabel("FRC with ground truth")
-    a.set_title(f"{ds.upper()}, {dose_ref[ds]:g} e/Å$^2$ total")
-h, l = ax[1].get_legend_handles_labels()
-fig.legend(h, l, loc="lower center", ncol=6, fontsize=5.5, frameon=False)
-fig.tight_layout(rect=(0, 0.16, 1, 1)); fig.savefig(os.path.join(FIG, "fig_frc_ref.pdf")); plt.show()
+for xscale, fn in (("log", "fig_frc_ref.pdf"), ("linear", "fig_frc_ref_linq.pdf")):   # logarithmic and linear q axis
+    fig, ax = plt.subplots(1, 2, figsize=(7.2, 3.4))
+    for a, ds in zip(ax, ("hr", "mr")):
+        for k, (lab, (r, c)) in enumerate(ref[ds].items()):
+            a.plot(c["q"][1:], c["frc"][1:], styles[k % 4], color=COL[k % 20], lw=1, label=lab)
+        a.axhline(0.5, color="k", lw=0.5)
+        a.set_xscale(xscale); a.set_ylim(-0.2, 1.02)
+        if xscale == "linear": a.set_xlim(0, c["q"][-1])
+        a.set_xlabel(r"$q$ (nm$^{-1}$)"); a.set_ylabel("FRC with ground truth")
+        a.set_title(f"{ds.upper()}, {dose_ref[ds]:g} e/Å$^2$ total")
+    h, l = ax[1].get_legend_handles_labels()
+    fig.legend(h, l, loc="lower center", ncol=6, fontsize=5.5, frameon=False)
+    fig.tight_layout(rect=(0, 0.16, 1, 1)); fig.savefig(os.path.join(FIG, fn)); plt.show()
 """)
 
 md(r"""
@@ -407,23 +411,27 @@ parameters, model errors, the poorly transferred low frequencies) are **not** de
 """)
 
 code(r"""
-fig, ax = plt.subplots(1, 2, figsize=(7.2, 2.6))
-half_rows = []
-for a, ds, meth, opt in ((ax[0], "hr", "frwr", dict(n_iter=it["grad"])), (ax[1], "mr", "gpfrwr_lsq", dict(n_iter=it["grad"], init="mftie"))):
+half = []
+for ds, meth, opt in (("hr", "frwr", dict(n_iter=it["grad"])), ("mr", "gpfrwr_lsq", dict(n_iter=it["grad"], init="mftie"))):
     I = noisy(I0[ds], P[ds], dose_ref[ds])
     h1, h2 = binomial_split(I, rng=1)
     r1 = ih.reconstruct(h1, P[ds], meth, **opt); r2 = ih.reconstruct(h2, P[ds], meth, **opt)
     q, fh, npts = frc(align_global_phase(r1.wave, r2.wave), r2.wave, P[ds].pixel_size_nm)
     rf = ih.reconstruct(I, P[ds], meth, **opt)
     ct = compare_to_truth(rf.wave, GT[ds], P[ds].pixel_size_nm)
-    pred = np.sqrt(np.clip(2 * fh / (1 + fh), 0, 1))
-    a.plot(q[1:], fh[1:], label="half-set FRC")
-    a.plot(q[1:], pred[1:], "--", label="predicted FRC$_{truth}$")
-    a.plot(q[1:], ct["frc"][1:], label="FRC with truth (full data)")
-    a.plot(q[1:], half_bit_threshold(npts)[1:], "k:", lw=0.8, label="half-bit")
-    a.set_xscale("log"); a.set_ylim(-0.2, 1.02); a.set_xlabel(r"$q$ (nm$^{-1}$)"); a.set_title(f"{ds.upper()}, {meth}")
-ax[0].legend(fontsize=6)
-fig.tight_layout(); fig.savefig(os.path.join(FIG, "fig_halfset.pdf")); plt.show()
+    half.append((ds, meth, q, fh, npts, ct))
+for xscale, fn in (("log", "fig_halfset.pdf"), ("linear", "fig_halfset_linq.pdf")):   # logarithmic and linear q axis
+    fig, ax = plt.subplots(1, 2, figsize=(7.2, 2.6))
+    for a, (ds, meth, q, fh, npts, ct) in zip(ax, half):
+        pred = np.sqrt(np.clip(2 * fh / (1 + fh), 0, 1))
+        a.plot(q[1:], fh[1:], label="half-set FRC")
+        a.plot(q[1:], pred[1:], "--", label="predicted FRC$_{truth}$")
+        a.plot(q[1:], ct["frc"][1:], label="FRC with truth (full data)")
+        a.plot(q[1:], half_bit_threshold(npts)[1:], "k:", lw=0.8, label="half-bit")
+        a.set_xscale(xscale); a.set_ylim(-0.2, 1.02); a.set_xlabel(r"$q$ (nm$^{-1}$)"); a.set_title(f"{ds.upper()}, {meth}")
+        if xscale == "linear": a.set_xlim(0, q[-1])
+    ax[0].legend(fontsize=6)
+    fig.tight_layout(); fig.savefig(os.path.join(FIG, fn)); plt.show()
 """)
 
 md(r"""
