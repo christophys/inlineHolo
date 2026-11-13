@@ -20,7 +20,9 @@ and exporting FAIR data in the NeXus/**NXem** format.
   NXem export validated with `pynxtools`; import from and upload to **NOMAD**.
 * Long computations run in the background with progress, remaining time and a stop button.
 * **NOMAD plugin** – the app as a NOMAD **dashboard** (with the user's NOMAD login) and the reconstruction as a
-  NOMAD **action** on a worker, results added to the upload as NXem ([docs/NOMAD_PLUGIN.md](docs/NOMAD_PLUGIN.md)).
+  NOMAD **action** on a worker, results added to the upload as NXem; a **batch action** spreads many series
+  over CPU (alignment) and GPU (reconstruction) workers via NOMAD's Temporal workflow engine
+  ([docs/NOMAD_PLUGIN.md](docs/NOMAD_PLUGIN.md)).
 
 ## Screenshots
 
@@ -57,7 +59,8 @@ In NOMAD (e.g. [nomad-distro-dev](https://github.com/FAIRmat-NFDI/nomad-distro-d
 git submodule add https://github.com/christophys/inlineHolo.git packages/inlineHolo
 uv add "./packages/inlineHolo[nomad]" && uv sync
 uv run poe start        # dashboard: http://localhost:8000/nomad-oasis/dashboards/inlineholo/
-uv run poe cpuworker    # runs the action "Inline holography: reconstruct a focal series"
+uv run poe cpuworker    # runs the actions (single series, batch)
+uv run poe gpuworker    # optional: GPU reconstructions of the batch action
 ```
 
 From Python:

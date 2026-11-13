@@ -25,6 +25,8 @@ from inlineholo.app import App
 from inlineholo.nomad import NomadClient, NomadError
 
 ACTION_ID = "inlineholo_nomad.actions:inlineholo_reconstruction"
+BATCH_ACTION_ID = "inlineholo_nomad.actions:inlineholo_batch"
+APPROVAL_SIGNAL = "approve_alignment"
 ACTION_METHODS = ["frwr", "gpfrwr", "frwr_gf", "frwr_gd", "gpfrwr_lsq", "mal", "ml_poisson", "iwfr", "gs", "tie",
                   "tie_full", "tie_poly", "tie_fp", "mftie", "gftie", "pam", "schiske"]
 
@@ -155,8 +157,52 @@ class NomadSession:
                       W.HBox([self.w_ac_upload]), W.HBox([self.w_ac_path, self.w_ac_take]),
                       W.HBox([self.w_ac_method, self.w_ac_iter, self.w_ac_align]), self.w_ac_folder,
                       self.w_ac_params, W.HBox([self.w_ac_start, self.w_ac_refresh]), self.w_ac_status])
-        self.panel = W.Accordion(children=[box], titles=("run on a NOMAD worker (NOMAD action)",))
+        self._build_batch_panel()
+        self.panel = W.Accordion(children=[box, self.batch_box],
+                                 titles=("run on a NOMAD worker (NOMAD action)",
+                                         "batch on NOMAD workers: alignment on CPU, reconstruction on GPU"))
         self.panel.selected_index = None
+
+    def _build_batch_panel(self):
+        st = {"description_width": "110px"}
+        self.w_bt_paths = W.Textarea(placeholder="one file or folder of the upload per line", description="series",
+                                     style=st, layout=W.Layout(width="560px", height="90px"))
+        self.w_bt_add = W.Button(description="add selection of tab 1", icon="plus", layout=W.Layout(width="210px"))
+        self.w_bt_mode = W.Dropdown(options=[("each stack / NXem file in a folder is a series", "series_files"),
+                                             ("a folder is one series of single images", "one_series")],
+                                    description="folders", style=st, layout=W.Layout(width="560px"))
+        self.w_bt_align = W.Checkbox(value=True, indent=False, description="FRWR alignment (CPU workers)",
+                                     layout=W.Layout(width="auto"))
+        self.w_bt_approve = W.Checkbox(value=True, indent=False, layout=W.Layout(width="auto"),
+                                       description="ask me to approve the alignment before reconstructing")
+        self.w_bt_gpu = W.Checkbox(value=True, indent=False, layout=W.Layout(width="auto"),
+                                   description="reconstruct on GPU workers (CPU if none is free within")
+        self.w_bt_wait = W.FloatText(value=10.0, layout=W.Layout(width="70px"))
+        self.w_bt_par = W.BoundedIntText(value=4, min=1, max=64, description="in parallel", style=st,
+                                         layout=W.Layout(width="200px"))
+        self.w_bt_start = W.Button(description="start batch", icon="play", button_style="primary",
+                                   layout=W.Layout(width="220px"))
+        self.w_bt_signal = W.HTML()
+        self.w_bt_ok_all = W.Button(description="approve all", icon="check", button_style="success",
+                                    layout=W.Layout(width="150px", display="none"))
+        self.w_bt_sel = W.Text(placeholder="e.g. 0, 2, 3", description="only series", style=st,
+                               layout=W.Layout(width="300px", display="none"))
+        self.w_bt_ok_sel = W.Button(description="approve these", icon="check-square-o",
+                                    layout=W.Layout(width="160px", display="none"))
+        self.pending = None
+        self.w_bt_add.on_click(lambda _: self._bt_add())
+        self.w_bt_start.on_click(lambda _: self._bt_start())
+        self.w_bt_ok_all.on_click(lambda _: self._bt_approve(True))
+        self.w_bt_ok_sel.on_click(lambda _: self._bt_approve(False))
+        self.batch_box = W.VBox([
+            W.HTML("Several focal series of the upload as one NOMAD action, coordinated by NOMAD's workflow engine "
+                   "(Temporal): every series is copied, loaded and aligned on a CPU worker (several in parallel), "
+                   "then reconstructed on a GPU worker if one is running (otherwise on a CPU worker), and the NXem "
+                   "results plus a summary go into the upload. Method, iterations and result folder as above. "
+                   "With approval, NOMAD stops after the alignment and asks (here or on the Actions page of NOMAD)."),
+            W.HBox([self.w_bt_paths, self.w_bt_add]), self.w_bt_mode, W.HBox([self.w_bt_align, self.w_bt_par]),
+            self.w_bt_approve, W.HBox([self.w_bt_gpu, self.w_bt_wait, W.HTML("&nbsp;min)")]),
+            self.w_bt_start, self.w_bt_signal, W.HBox([self.w_bt_ok_all, self.w_bt_sel, self.w_bt_ok_sel])])
 
     def _take(self):
         a = self.app
@@ -185,41 +231,140 @@ class NomadSession:
                 d.update(defocus_start_nm=df[0], defocus_step_nm=df[1] - df[0])
         return d
 
-    def _start(self):
+    def _bt_add(self):
+        self._take()
+        p = self.w_ac_path.value.strip()
+        lines = [x for x in self.w_bt_paths.value.splitlines() if x.strip()]
+        if p and p not in lines:
+            self.w_bt_paths.value = "\n".join(lines + [p])
+
+    def batch_data(self):
         d = self.action_data()
-        if not d["upload_id"] or not d["path"]:
-            self.app._status(self.w_ac_status, "enter the upload ID and the file or folder", ok=False)
+        d.pop("path", None)
+        d.pop("align", None)
+        d.update(paths=[x.strip().strip("/") for x in self.w_bt_paths.value.splitlines() if x.strip()],
+                 folder_mode=self.w_bt_mode.value, align=bool(self.w_bt_align.value),
+                 approve_alignment=bool(self.w_bt_approve.value), reconstruct_on_gpu=bool(self.w_bt_gpu.value),
+                 gpu_wait_minutes=max(float(self.w_bt_wait.value), 0.1), max_parallel=int(self.w_bt_par.value))
+        if len(d["paths"]) > 1 or d["folder_mode"] == "series_files":
+            for k in ("defocus_start_nm", "defocus_step_nm"):      # tab 2 belongs to one series only
+                d.pop(k, None)
+        return d
+
+    def _bt_start(self):
+        d = self.batch_data()
+        if not d["upload_id"] or not d["paths"]:
+            self.app._status(self.w_ac_status, "enter the upload ID and at least one file or folder", ok=False)
             return
+        self._post_start(BATCH_ACTION_ID, d, "batch")
+
+    def _bt_approve(self, all_):
+        if not self.pending:
+            return
+        data = {"approve_all": True, "approved": [], "comment": "approved in the inline-holography dashboard"}
+        if not all_:
+            try:
+                idx = [int(x) for x in self.w_bt_sel.value.replace(";", ",").split(",") if x.strip()]
+            except ValueError:
+                self.app._status(self.w_bt_signal, "series indices: integers separated by commas", ok=False)
+                return
+            data.update(approve_all=False, approved=idx)
+        try:
+            self.client()._req("POST", f"/actions/{urllib.parse.quote(self.pending, safe='')}/signal-input",
+                               data=json.dumps({"signal_fn_name": APPROVAL_SIGNAL, "data": data}).encode(),
+                               ctype="application/json")
+        except NomadError as e:
+            self.app._status(self.w_bt_signal, f"could not send the approval: {e}", ok=False)
+            return
+        self.pending = None
+        self._refresh()
+
+    def _post_start(self, action_id, d, kind):
         try:
             body = json.dumps({"data": d}).encode()
-            r = self.client()._req("POST", f"/actions/{urllib.parse.quote(ACTION_ID, safe='')}/start", data=body,
+            r = self.client()._req("POST", f"/actions/{urllib.parse.quote(action_id, safe='')}/start", data=body,
                                    ctype="application/json")
         except NomadError as e:
             self.app._status(self.w_ac_status, f"could not start the action: {e}", ok=False)
             return
         iid = r.get("action_instance_id", "")
-        self.instances.append((iid, d))
+        self.instances.append((iid, d, kind))
         self.app._status(self.w_ac_status, f"started: {iid}")
         self._refresh()
 
+    def _start(self):
+        d = self.action_data()
+        if not d["upload_id"] or not d["path"]:
+            self.app._status(self.w_ac_status, "enter the upload ID and the file or folder", ok=False)
+            return
+        self._post_start(ACTION_ID, d, "single")
+
     def _refresh(self):
         rows = []
-        for iid, d in self.instances[-10:]:
+        pending = None
+        for iid, d, kind in self.instances[-10:]:
+            q = urllib.parse.quote(iid, safe="")
+            extra = ""
             try:
                 cl = self.client()
-                s = cl._req("GET", f"/actions/{urllib.parse.quote(iid, safe='')}/status").get("status", "?")
-                extra = ""
+                s = cl._req("GET", f"/actions/{q}/status").get("status", "?")
                 if s == "COMPLETED":
-                    res = cl._req("GET", f"/actions/{urllib.parse.quote(iid, safe='')}/result")
-                    res = res.get("result", res) if isinstance(res, dict) else res
-                    extra = (res or {}).get("message", "") if isinstance(res, dict) else str(res)
+                    res = cl._req("GET", f"/actions/{q}/result")
+                    res = res.get("result", res) if isinstance(res, dict) and "result" in res else res
+                    if isinstance(res, dict) and "n_series" in res:
+                        extra = (f"{res.get('n_done')} of {res.get('n_series')} series reconstructed; "
+                                 + "; ".join(f"{r.get('name')}: {r.get('status')}"
+                                             + (f" ({r.get('reconstructed_on', '').split('-')[0]})"
+                                                if r.get("status") == "done" else "") for r in res.get("results", [])))
+                    else:
+                        extra = (res or {}).get("message", "") if isinstance(res, dict) else str(res)
+                elif s == "RUNNING" and kind == "batch":
+                    rec = cl._req("GET", f"/actions/{q}")
+                    req = [r for r in rec.get("signal_input_requests", []) or []
+                           if r.get("signal_fn_name") == APPROVAL_SIGNAL]
+                    if req:
+                        pending = (iid, req[0])
+                        extra = "<b style='color:#b26a00'>waiting for your approval of the alignment</b>"
             except NomadError as e:
                 s, extra = "?", str(e)
             gui = self.url.split("/api/")[0] + f"/gui/user/uploads/upload/id/{d['upload_id']}" if self.url else ""
-            rows.append(f"<tr><td>{d['method']}</td><td>{d['upload_id']}/{d['path']}</td><td><b>{s}</b></td>"
+            src = d.get("path") or ", ".join(d.get("paths", []))
+            rows.append(f"<tr><td>{kind}</td><td>{d['method']}</td><td>{d['upload_id']}/{src}</td><td><b>{s}</b></td>"
                         f"<td>{extra}</td><td><a href='{gui}' target='_blank'>upload</a></td></tr>")
-        self.w_ac_status.value = ("<table style='font-size:12px'><tr><th>method</th><th>input</th><th>status</th>"
-                                  "<th></th><th></th></tr>" + "".join(rows) + "</table>") if rows else ""
+        self.w_ac_status.value = ("<table style='font-size:12px'><tr><th></th><th>method</th><th>input</th>"
+                                  "<th>status</th><th></th><th></th></tr>" + "".join(rows) + "</table>") if rows else ""
+        self.pending = pending[0] if pending else None
+        vis = "flex" if pending else "none"
+        for w in (self.w_bt_ok_all, self.w_bt_sel, self.w_bt_ok_sel):
+            w.layout.display = vis
+        if pending:
+            r = pending[1]
+            self.w_bt_signal.value = (f"<b>{r.get('title') or 'Approval'}</b> — {r.get('description') or ''}"
+                                      + md_table(r.get("content") or ""))
+        else:
+            self.w_bt_signal.value = ""
+
+
+def md_table(md):
+    """Markdown (pipe tables + paragraphs) of the approval request as HTML."""
+    import html
+    out, rows = [], []
+    for line in md.splitlines() + [""]:
+        if line.strip().startswith("|"):
+            cells = [html.escape(c.strip()) for c in line.strip().strip("|").split("|")]
+            if not all(set(c) <= set("-: ") for c in cells):
+                rows.append(cells)
+            continue
+        if rows:
+            body = ""
+            for i, r in enumerate(rows):
+                tag = "th" if i == 0 else "td"
+                body += "<tr>" + "".join(f"<{tag} style='padding:1px 8px'>{c}</{tag}>" for c in r) + "</tr>"
+            out.append("<table style='font-size:12px;border-collapse:collapse'>" + body + "</table>")
+            rows = []
+        if line.strip():
+            out.append(f"<p>{html.escape(line)}</p>")
+    return "".join(out)
 
 
 def make_app(cookies=None, headers=None, root_path=None, work_dir=None):

@@ -56,8 +56,8 @@ def test_params_overrides():
 def test_action_run_in_upload(tmp_path):
     pytest.importorskip("temporalio")
     pytest.importorskip("nomad.config")
-    from inlineholo_nomad.actions.activities import input_files, run_in_upload
-    from inlineholo_nomad.actions.models import ReconstructFocalSeriesInput
+    from inlineholo_nomad.workflows.activities import input_files, run_in_upload
+    from inlineholo_nomad.workflows.models import ReconstructFocalSeriesInput
     from inlineholo.frwr3_io import write_img
     I, p = _series(tmp_path)
     up = tmp_path / "upload"                         # stands for the raw files of a NOMAD upload
@@ -136,6 +136,31 @@ def test_dashboard_page_session(mock, tmp_path, monkeypatch):
     s._start()
     assert started and started[0]["data"]["upload_id"] == "U1" and started[0]["data"]["method"] == "tie"
     assert "COMPLETED" in s.w_ac_status.value and "written res/x.nxs" in s.w_ac_status.value
+    # batch with approval of the alignment
+    bstarted, signals = [], []
+
+    def bstart(q, b):
+        bstarted.append(json.loads(b))
+        return 200, {"action_instance_id": "inst-2"}
+
+    mock.extra[("POST", "actions/inlineholo_nomad.actions:inlineholo_batch/start")] = bstart
+    mock.extra[("GET", "actions/inst-2/status")] = lambda q, b: (200, {"status": "RUNNING"})
+    mock.extra[("GET", "actions/inst-2")] = lambda q, b: (200, {"signal_input_requests": [
+        {"signal_fn_name": "approve_alignment", "title": "Approve the alignment", "description": "2 of 2 aligned",
+         "content": "| # | series |\n|---|---|\n| 0 | a |\n| 1 | b |\n\nApprove all."}]})
+    mock.extra[("POST", "actions/inst-2/signal-input")] = lambda q, b: (signals.append(json.loads(b)) or 200,
+                                                                         {"status": "signal_input_submitted"})
+    s.w_bt_paths.value = "raw/a.nxs\nraw/b.nxs"
+    s._bt_start()
+    d = bstarted[0]["data"]
+    assert d["paths"] == ["raw/a.nxs", "raw/b.nxs"] and d["approve_alignment"] and d["reconstruct_on_gpu"]
+    assert "defocus_start_nm" not in d and s.pending == "inst-2"
+    assert "<td style='padding:1px 8px'>b</td>" in s.w_bt_signal.value and s.w_bt_ok_all.layout.display == "flex"
+    s.w_bt_sel.value = "1"
+    s._bt_approve(False)
+    assert signals == [{"signal_fn_name": "approve_alignment",
+                        "data": {"approve_all": False, "approved": [1],
+                                 "comment": "approved in the inline-holography dashboard"}}]
     # files written by the app go to the session folder
     assert a._out_dir().startswith(str(tmp_path / "w"))
 

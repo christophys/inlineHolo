@@ -6,6 +6,7 @@ The repository is also a NOMAD plugin (package `inlineholo_nomad`, entry points 
 |---|---|---|
 | `inlineholo_nomad.dashboards:inlineholo_dashboard` | dashboard | the inline-holography app (the same GUI as the Voilà / Solara app) inside NOMAD, at `{api_base_path}/dashboards/inlineholo/` |
 | `inlineholo_nomad.actions:inlineholo_reconstruction` | action | reconstruction of a focal series of a NOMAD upload on a NOMAD worker; the NXem result is added to the upload |
+| `inlineholo_nomad.actions:inlineholo_batch` | action | several series in parallel, coordinated by Temporal: alignment on CPU workers, optional approval, reconstruction on GPU workers (CPU fallback) |
 
 Both need the new NOMAD GUI and NOMAD ≥ 2.0 (dashboard and action entry points).
 
@@ -19,7 +20,8 @@ uv sync
 docker compose up -d                       # infrastructure (MongoDB, Elasticsearch, Temporal, ...)
 uv run poe setup                           # first time only
 uv run poe start                           # NOMAD API + new GUI (one FastAPI worker)
-uv run poe cpuworker                       # in a second terminal: CPU worker that runs the action
+uv run poe cpuworker                       # in a second terminal: CPU worker that runs the actions
+uv run poe gpuworker                       # optional, on a machine with a GPU: reconstructions of the batch action
 ```
 
 * **Dashboard:** new GUI (http://localhost:8000/nomad-oasis/gui/v2/) → *Dashboards* → *Inline holography*
@@ -42,6 +44,43 @@ uv run poe cpuworker                       # in a second terminal: CPU worker th
 
 *The dashboard served by the NOMAD app (`/nomad-oasis/dashboards/inlineholo/`): signed in with the NOMAD login,
 focal series imported from an upload, reconstruction started on a NOMAD worker (tab 5).*
+
+## Batch action: several workers coordinated by Temporal
+
+NOMAD actions are Temporal workflows. The batch action uses this to spread the work over the workers:
+
+```
+BatchReconstructWorkflow                                  (CPU queue; the action instance)
+ ├─ plan_batch                                 CPU        series of the given files / folders
+ ├─ PrepareSeriesWorkflow  ×N (≤ max_parallel) CPU        copy out of the upload, load, FRWR alignment
+ ├─ [approval]   request_signal_input_activity → waits for the signal approve_alignment
+ ├─ ReconstructSeriesWorkflow ×M               GPU queue  reconstruction (CuPy/PyTorch if available);
+ │                                             └ CPU      if no GPU worker takes it within gpu_wait_minutes
+ │   └─ write_series_result                    CPU        NXem → upload (output folder)
+ └─ finish_batch                               CPU        batch_summary_<time>.json → upload
+```
+
+* **Queues:** the workflows and the CPU activities run on `cpu-task-queue`; `reconstruct_series` is
+  registered on both queues (`task_queue_activities` of the action), so a GPU worker
+  (`uv run poe gpuworker`) takes the reconstructions, and without one they fall back to the CPU queue
+  after `gpu_wait_minutes`.
+* **Data between workers:** only paths and small records go through Temporal; the arrays are written to
+  the working folder of the action instance (NOMAD's `action_instance_artifacts_dir`). Workers on other
+  machines need this folder (NOMAD's `fs` volume) mounted at the same path. The folders are removed at the
+  end, also after cancellation or failure.
+* **Approval (human in the loop):** with `approve_alignment` the action stops after the alignment and asks
+  for approval (table of the series with R value and drift), in the dashboard (tab 5, batch section: *approve
+  all* / *approve these*) or on NOMAD's Actions page. Without an answer within `approval_timeout_hours`
+  nothing is reconstructed.
+* **Robustness:** a series that cannot be read or aligned is reported and skipped; the others continue. Long
+  activities heartbeat every few seconds (also during a long FRWR loop), so a crashed worker is noticed after
+  30 s and the work is retried once on another worker; cancelling the action interrupts the running
+  reconstruction within seconds.
+* **Result:** one NXem file per series (aligned series, FRWR alignment wave, exit wave) in the output folder
+  of the upload, and a JSON summary (status, R values, which queue did the reconstruction).
+
+The workflow code (`inlineholo_nomad/workflows/`) does not import NOMAD at module level, as Temporal
+re-imports workflow modules in its sandbox; NOMAD is only used inside the activities (`backend.py`).
 
 ## How the dashboard works
 
@@ -84,6 +123,11 @@ process (`inlineholo_nomad/dashboards/page.py`):
   (`plugins.entry_points.options."inlineholo_nomad.actions:inlineholo_reconstruction".task_queue`).
 
 ## Tests
+
+`tests/test_nomad_batch.py` runs the workflows on a real Temporal server (the `temporal` CLI dev server; found
+on the PATH or via `TEMPORAL_CLI`, otherwise the tests are skipped) with a CPU and a GPU worker as in NOMAD
+and local folders as uploads: alignment on CPU + reconstruction on the GPU queue, CPU fallback without GPU
+worker, approval of a subset, cancellation of a running reconstruction, and the single-series action.
 
 `tests/test_nomad_plugin.py` covers the headless pipeline, the action activity (with a stand-in for the upload
 files), the dashboard page against a mock NOMAD API and the Solara server mounted in FastAPI; the tests that

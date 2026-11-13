@@ -39,6 +39,7 @@ Repository = "https://github.com/christophys/inlineHolo"
 [project.entry-points.'nomad.plugin']
 inlineholo_dashboard = "inlineholo_nomad.dashboards:inlineholo_dashboard"
 inlineholo_reconstruction = "inlineholo_nomad.actions:inlineholo_reconstruction"
+inlineholo_batch = "inlineholo_nomad.actions:inlineholo_batch"
 
 [tool.setuptools.dynamic]
 version = { attr = "inlineholo.__version__" }

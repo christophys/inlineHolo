@@ -84,62 +84,14 @@ def run_in_upload(data: ReconstructFocalSeriesInput, *, is_file, listdir, copy_o
         shutil.rmtree(work, ignore_errors=True)
 
 
-# --------------------------------------------------------------------- NOMAD bindings
-def _nomad_upload(data):
-    from nomad.files import UploadFiles
-    from nomad.processing import Upload
-
-    try:
-        upload = Upload.get(data.upload_id)
-    except Exception as e:  # noqa: BLE001
-        raise ApplicationError(f"upload {data.upload_id} not found", non_retryable=True) from e
-    if data.user_id not in upload.writers:
-        raise ApplicationError("only the main author and the co-authors of the upload can run this action on it",
-                               non_retryable=True)
-    if upload.published:
-        raise ApplicationError("the upload is published; results cannot be added", non_retryable=True)
-    return upload, UploadFiles.get(data.upload_id)
-
-
-def _add_to_upload(upload, files, folder, tmp_root, attempts=60):
-    """Add the files to the upload (NOMAD processes them); waits while the upload is being processed."""
-    from nomad.processing.base import ProcessAlreadyRunning
-
-    staged = tempfile.mkdtemp(prefix="inlineholo_add_", dir=tmp_root)
-    ops = []
-    for f in files:
-        dst = os.path.join(staged, os.path.basename(f))
-        shutil.copy2(f, dst)
-        ops.append(dict(op="ADD", path=dst, target_dir=folder, temporary=True))
-    for k in range(attempts):
-        try:
-            upload.reload()
-            upload.process_upload(file_operations=ops, only_updated_files=True)
-            return
-        except ProcessAlreadyRunning:
-            activity.heartbeat("waiting for the processing of the upload")
-            time.sleep(5)
-    raise ApplicationError("the upload stayed busy; the result could not be added", non_retryable=False)
-
-
+# --------------------------------------------------------------------- activity
 @activity.defn
 def reconstruct_focal_series(data: ReconstructFocalSeriesInput) -> ReconstructFocalSeriesResult:
-    from nomad.config import config
+    from .backend import get_backend
 
-    upload, uf = _nomad_upload(data)
-    tmp_root = os.path.abspath(config.fs.tmp)
-    os.makedirs(tmp_root, exist_ok=True)
-
-    def is_file(p):
-        return uf.raw_path_is_file(p)
-
-    def listdir(p):
-        return [(os.path.basename(e.path), e.is_file) for e in uf.raw_listdir(p)]
-
-    def copy_out(p, local):
-        with uf.raw_file(p, "rb") as fi, open(local, "wb") as fo:
-            shutil.copyfileobj(fi, fo, 1 << 22)
-
+    be = get_backend()
+    be.check_access(data.upload_id, data.user_id)
+    uid = data.upload_id
     last = [0.0]
 
     def progress(stage, frac, msg):
@@ -149,6 +101,7 @@ def reconstruct_focal_series(data: ReconstructFocalSeriesInput) -> ReconstructFo
             activity.heartbeat(f"{stage} {frac:.0%}: {msg}")
             activity.logger.info(f"{stage} {frac:.0%}: {msg}")
 
-    return run_in_upload(data, is_file=is_file, listdir=listdir, copy_out=copy_out,
-                         add_files=lambda files, folder: _add_to_upload(upload, files, folder, tmp_root),
-                         tmp_root=tmp_root, progress=progress)
+    return run_in_upload(data, is_file=lambda p: be.is_file(uid, p), listdir=lambda p: be.listdir(uid, p),
+                         copy_out=lambda p, local: be.copy_out(uid, p, local),
+                         add_files=lambda files, folder: be.add_files(uid, files, folder),
+                         tmp_root=be.tmp_root(), progress=progress)
