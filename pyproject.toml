@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "inlineholo"
+dynamic = ["version"]
+description = "Inline electron holography: exit-wave reconstruction from TEM focal series (FRWR, TIE, ...), app, NOMAD plugin"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
+authors = [{ name = "Christoph T. Koch" }]
+dependencies = [
+    "numpy",
+    "scipy",
+    "h5py",
+    "matplotlib",
+    "scikit-image",
+    "tifffile",
+    "ipywidgets>=8",
+    "pyyaml",
+]
+
+[project.optional-dependencies]
+# stand-alone web app (solara run webapp/solara_app.py); solara-assets (offline JavaScript) must match the solara version
+web = ["solara==1.58.2", "solara-assets==1.58.2"]
+# NXem validation and more input formats
+nexus = ["pynxtools>=0.16", "pynxtools-em>=0.4", "rosettasciio", "mrcfile"]
+# NOMAD plugin (dashboard + action); nomad-lab itself comes with the NOMAD installation
+nomad = ["solara==1.58.2", "solara-assets==1.58.2", "pynxtools>=0.16", "pynxtools-em>=0.4", "rosettasciio", "mrcfile"]
+notebooks = ["jupyter", "voila", "nbformat", "pandas"]
+gpu = ["torch"]
+dev = ["pytest"]
+
+[project.urls]
+Repository = "https://github.com/christophys/inlineHolo"
+
+[project.entry-points.'nomad.plugin']
+inlineholo_dashboard = "inlineholo_nomad.dashboards:inlineholo_dashboard"
+inlineholo_reconstruction = "inlineholo_nomad.actions:inlineholo_reconstruction"
+
+[tool.setuptools.dynamic]
+version = { attr = "inlineholo.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["inlineholo", "inlineholo.*", "inlineholo_nomad", "inlineholo_nomad.*"]

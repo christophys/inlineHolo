@@ -28,6 +28,7 @@ class MockNomad:
         self.names = {"U1": "focal series project"}
         self.published = set()
         self.requests = []
+        self.extra = {}      # (method, path) -> f(query, body) -> (code, obj): further endpoints for other tests
         mock = self
 
         class H(BaseHTTPRequestHandler):
@@ -51,6 +52,11 @@ class MockNomad:
                 mock.requests.append((method, "/".join(parts), q))
                 if not self._auth():
                     return self._send(401, {"detail": "not authorized"})
+                key = (method, "/".join(parts))
+                if key in mock.extra:
+                    n = int(self.headers.get("Content-Length", 0) or 0)
+                    code, obj = mock.extra[key](q, self.rfile.read(n) if n else b"")
+                    return self._send(code, obj)
                 if parts == ["uploads"] and method == "GET":
                     return self._send(200, {"data": [{"upload_id": k, "upload_name": mock.names.get(k, ""),
                                                       "published": k in mock.published} for k in mock.uploads]})

@@ -19,6 +19,8 @@ and exporting FAIR data in the NeXus/**NXem** format.
 * **Data** – NXem/NeXus, DM3/DM4 (with FRWR tags), FRWR3/QSTEM `.img` series, TIFF, EMD, MRC, NPY;
   NXem export validated with `pynxtools`; import from and upload to **NOMAD**.
 * Long computations run in the background with progress, remaining time and a stop button.
+* **NOMAD plugin** – the app as a NOMAD **dashboard** (with the user's NOMAD login) and the reconstruction as a
+  NOMAD **action** on a worker, results added to the upload as NXem ([docs/NOMAD_PLUGIN.md](docs/NOMAD_PLUGIN.md)).
 
 ## Screenshots
 
@@ -34,7 +36,7 @@ and exporting FAIR data in the NeXus/**NXem** format.
 ## Quick start
 
 ```bash
-pip install -r requirements.txt            # numpy, scipy, h5py, scikit-image, ipywidgets, ...
+pip install -e ".[web,nexus]"              # or: pip install -r requirements.txt
 pip install pynxtools pynxtools-em          # optional: NXem validation
 
 # the app in the browser, without Jupyter
@@ -47,6 +49,15 @@ voila notebooks/02_inline_holography_app.ipynb
 # or as a container (also the basis of a Galaxy Interactive Tool, see galaxy/)
 docker build -t inlineholo-web -f galaxy/Dockerfile .
 docker run -p 8765:8765 inlineholo-web
+```
+
+In NOMAD (e.g. [nomad-distro-dev](https://github.com/FAIRmat-NFDI/nomad-distro-dev)):
+
+```bash
+git submodule add https://github.com/christophys/inlineHolo.git packages/inlineHolo
+uv add "./packages/inlineHolo[nomad]" && uv sync
+uv run poe start        # dashboard: http://localhost:8000/nomad-oasis/dashboards/inlineholo/
+uv run poe cpuworker    # runs the action "Inline holography: reconstruct a focal series"
 ```
 
 From Python:
@@ -66,6 +77,7 @@ methods, the FRWR3 port against the C++ program, NXem validity, the app and the 
 
 ```
 inlineholo/        Python package (reconstruction, FRWR3 port, alignment, Thon fit, DIH, NXem, NOMAD, app)
+inlineholo_nomad/  NOMAD plugin: dashboard (the app inside NOMAD) and action (reconstruction on a worker)
 webapp/            stand-alone web app (Solara)
 galaxy/            Dockerfile and draft Galaxy Interactive Tool
 notebooks/         00 download a repository, 01 method comparison, 02 the app (Voilà)

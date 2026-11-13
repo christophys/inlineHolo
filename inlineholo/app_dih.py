@@ -118,7 +118,8 @@ class DIHTabMixin:
             W.HTML("<b>Crystal and orientation</b> (2D reflection vectors from the unit cell):"), lat,
             W.HTML("<b>Reflections</b>"),
             W.HBox([self.w_dih_hkl, self.w_dih_add_rec, self.w_dih_add_init]),
-            W.HBox([self.w_dih_path, self.w_dih_add_path]), self.w_dih_upload,
+            *([] if getattr(self, "server_mode", False) else [W.HBox([self.w_dih_path, self.w_dih_add_path])]),
+            self.w_dih_upload,
             self.w_dih_rows, self.w_dih_msg,
             W.HTML("<b>Alignment of the reflections</b> (shifts in pixels, x right / y down; edit in the table):"),
             W.HBox([self.w_dih_i1, self.w_dih_i2, self.w_dih_ovl_kind, self.w_dih_ovl, self.w_dih_auto]),
@@ -226,6 +227,9 @@ class DIHTabMixin:
         paths = []
         for p in [t.strip() for t in str(text).split(";") if t.strip()]:
             p = os.path.expanduser(p)
+            if not self._allowed_path(p):
+                self._dih_msg("reading files of the server is not possible here", ok=False)
+                return
             if os.path.isdir(p):
                 fs = sorted(os.path.join(p, f) for f in os.listdir(p)
                             if f.lower().endswith((".dm3", ".dm4", ".img", ".npy", ".tif", ".tiff"))

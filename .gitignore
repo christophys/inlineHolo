@@ -5,3 +5,4 @@ output/
 nomad_downloads/
 *.egg-info/
 .venv/
+build/

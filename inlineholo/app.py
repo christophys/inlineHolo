@@ -58,8 +58,13 @@ def _bin(stack, b):
 
 
 class App(DIHTabMixin, NomadMixin):
-    def __init__(self, data_dir=None):
+    def __init__(self, data_dir=None, server_mode=False, work_dir=None):
+        """data_dir: folder with example data (tab 1).  server_mode: the app is shared by several users on a
+        server (NOMAD dashboard): no access to the server's file system except data_dir and work_dir; all
+        written files go to work_dir/output (work_dir: a private folder of this session, default: cwd)."""
         self.data_dir = data_dir
+        self.server_mode = bool(server_mode)
+        self.work_dir = os.path.abspath(work_dir or os.getcwd())
         self.raw = None          # stack as loaded
         self.stack = None        # working stack (binned/cropped/aligned)
         self.meta = {}
@@ -92,7 +97,7 @@ class App(DIHTabMixin, NomadMixin):
         self.w_path_load = W.Button(description="load", icon="folder-open")
         self.w_path_load.on_click(lambda _: self._load_path(self.w_path.value.strip()))
         # simple file browser on the host running the kernel
-        start = os.path.abspath(self.data_dir) if self.data_dir and os.path.isdir(self.data_dir) else os.getcwd()
+        start = os.path.abspath(self.data_dir) if self.data_dir and os.path.isdir(self.data_dir) else self.work_dir
         self.w_br_dir = W.Text(value=start, description="folder", style={"description_width": "60px"},
                                layout=W.Layout(width="560px"))
         self.w_br_up = W.Button(description="up", icon="level-up", layout=W.Layout(width="70px"))
@@ -138,13 +143,18 @@ class App(DIHTabMixin, NomadMixin):
         self.w_demo.observe(self._on_demo, names="value")
         self.w_apply_prep.on_click(lambda _: self._prepare())
         self._build_nomad()
-        tab_load = W.VBox([W.HTML("<b>1. Load a focal series</b> — NXem/NeXus, TIFF stack or several single "
-                                  "images (one per defocus), DM3/DM4, FRWR3/QSTEM .img frames, EMD, MRC, NPY — from "
-                                  "this computer, the data folder, or a NOMAD upload. Large files (e.g. 140 MB DM3 "
-                                  "stacks) are best loaded by path or from the data folder; browser uploads are "
-                                  "limited by the web server's message size."),
-                           W.HBox([self.w_upload, self.w_demo]),
-                           W.HBox([self.w_path, self.w_path_load]), self.w_browser, self.nomad_import_box(),
+        intro = ("<b>1. Load a focal series</b> — NXem/NeXus, TIFF stack or several single images (one per "
+                 "defocus), DM3/DM4, FRWR3/QSTEM .img frames, EMD, MRC, NPY — ")
+        intro += ("from a NOMAD upload (recommended for large files) or from your computer (browser upload, limited "
+                  "by the message size of the web server)." if self.server_mode else
+                  "from this computer, the data folder, or a NOMAD upload. Large files (e.g. 140 MB DM3 stacks) are "
+                  "best loaded by path or from the data folder; browser uploads are limited by the web server's "
+                  "message size.")
+        tab_load = W.VBox([W.HTML(intro),
+                           W.HBox([self.w_upload] + ([self.w_demo] if len(self.w_demo.options) > 1
+                                                     or not self.server_mode else [])),
+                           *([] if self.server_mode else [W.HBox([self.w_path, self.w_path_load]), self.w_browser]),
+                           self.nomad_import_box(),
                            W.HBox([self.w_bin, self.w_crop, self.w_apply_prep]),
                            self.w_load_status, self.w_conv_box,
                            W.Accordion(children=[self.w_meta], titles=("extracted metadata",))])
@@ -564,6 +574,9 @@ class App(DIHTabMixin, NomadMixin):
     # ------------------------------------------------------------------ loading
     def _browse(self):
         d = os.path.expanduser(self.w_br_dir.value.strip() or ".")
+        if not self._allowed_path(d):
+            self.w_br_list.options = [("(not available on this server)", None)]
+            return
         if not os.path.isdir(d):
             self.w_br_list.options = [("(folder not found)", None)]
             return
@@ -594,8 +607,24 @@ class App(DIHTabMixin, NomadMixin):
         else:
             self.w_path.value = path
 
+    def _out_dir(self):
+        """Folder for all written files (private to the session in server mode)."""
+        d = os.path.join(self.work_dir, "output")
+        os.makedirs(d, exist_ok=True)
+        return d
+
+    def _allowed_path(self, path):
+        """In server mode only files below work_dir and data_dir may be read."""
+        if not self.server_mode:
+            return True
+        rp = os.path.realpath(os.path.expanduser(str(path)))
+        roots = [self.work_dir] + ([self.data_dir] if self.data_dir else [])
+        return any(rp == os.path.realpath(r) or rp.startswith(os.path.realpath(r) + os.sep) for r in roots)
+
     def _find_local(self, name, size):
         """Path of a local file with this name and size (upload from the same computer), else None."""
+        if self.server_mode:
+            return None
         dirs = [self.w_br_dir.value, self.data_dir, os.getcwd(),
                 os.path.dirname(os.path.expanduser(self.w_path.value.strip())) if self.w_path.value.strip() else None,
                 "~/Downloads", "~/Desktop", "~/Documents", "~"]
@@ -662,6 +691,9 @@ class App(DIHTabMixin, NomadMixin):
         if not path:
             return
         path = os.path.expanduser(path)
+        if not self._allowed_path(path):
+            self._status(self.w_load_status, "reading files of the server is not possible here", ok=False)
+            return
         if not os.path.isfile(path):
             self._status(self.w_load_status, f"file not found: {path}", ok=False)
             return
@@ -673,6 +705,9 @@ class App(DIHTabMixin, NomadMixin):
     def _load_folder(self, folder):
         from .io_formats import load_folder
         folder = os.path.expanduser(str(folder).strip())
+        if not self._allowed_path(folder):
+            self._status(self.w_load_status, "reading folders of the server is not possible here", ok=False)
+            return
         try:
             stack, md = load_folder(folder)
         except Exception as e:  # noqa: BLE001
@@ -784,7 +819,7 @@ class App(DIHTabMixin, NomadMixin):
         if not is_nx:
             base = os.path.splitext(source_path or name)[0]
             if source_path is None:
-                base = os.path.join(os.path.abspath("output"), os.path.basename(base))
+                base = os.path.join(self._out_dir(), os.path.basename(base))
             self.w_conv_name.value = base + ".nxs"
         else:
             self.tabs.selected_index = 1
@@ -1437,7 +1472,7 @@ class App(DIHTabMixin, NomadMixin):
             txt, ext = yaml.safe_dump(meta, sort_keys=False, allow_unicode=True), "yaml"
         except ImportError:
             txt, ext = json.dumps(meta, indent=2), "json"
-        out_dir = os.path.abspath("output")
+        out_dir = self._out_dir()
         os.makedirs(out_dir, exist_ok=True)
         path = os.path.join(out_dir, f"nxem_metadata.{ext}")
         with open(path, "w", encoding="utf-8") as fh:
@@ -1501,6 +1536,8 @@ class App(DIHTabMixin, NomadMixin):
         path = self.w_conv_name.value.strip()
         if not path.lower().endswith(".nxs"):
             path += ".nxs"
+        if self.server_mode:
+            path = os.path.join(self._out_dir(), os.path.basename(path))
         os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)
         p = self.params(all_images=True)
         p.pixel_size_nm = self.w_pix.value / getattr(self, "_bin_used", 1)      # raw (unbinned) pixel size
@@ -1683,7 +1720,7 @@ class App(DIHTabMixin, NomadMixin):
                                           "metadata\" in tab 6.</span>")
             return None
         if path is None:
-            out_dir = os.path.abspath("output")
+            out_dir = self._out_dir()
             os.makedirs(out_dir, exist_ok=True)
             path = os.path.join(out_dir, os.path.basename(self.w_fa_fname.value.strip() or "frwr_aligned.nxs"))
         p = self._init_params()
@@ -1755,7 +1792,7 @@ class App(DIHTabMixin, NomadMixin):
                                      + ") or tick \"write 'unknown' for missing required metadata\".</span>")
             return
         fn = self.w_fname.value.strip() or "reconstruction.nxs"
-        out_dir = os.path.abspath("output")
+        out_dir = self._out_dir()
         os.makedirs(out_dir, exist_ok=True)
         path = os.path.join(out_dir, os.path.basename(fn))
         self.save(path, meta, derived=self.w_derived.value)

@@ -167,7 +167,7 @@ class NomadMixin:
             self._nm_browse()
 
     def _nm_cache(self, uid):
-        d = os.path.abspath(os.path.join("nomad_downloads", re.sub(r"[^A-Za-z0-9_.-]", "_", uid)))
+        d = os.path.abspath(os.path.join(getattr(self, "work_dir", "."), "nomad_downloads", re.sub(r"[^A-Za-z0-9_.-]", "_", uid)))
         os.makedirs(d, exist_ok=True)
         return d
 
