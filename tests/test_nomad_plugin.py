@@ -184,3 +184,81 @@ def test_dashboard_server_mounted(tmp_path, monkeypatch):
     r = cl.get("/nomad-oasis/dashboards/inlineholo/")
     assert r.status_code == 200 and "solara" in r.text.lower()
     assert "/nomad-oasis/dashboards/inlineholo/static" in r.text
+
+
+def test_workflow_eln_archives(tmp_path):
+    """Processing steps -> ELN (nomad-measurements based), datasets and workflow2 archives, SVG preview."""
+    yaml = pytest.importorskip("yaml")
+    import matplotlib
+    matplotlib.use("Agg")
+    from inlineholo.app import App
+    from inlineholo import eln
+    I, p = _series(tmp_path)
+    f = tmp_path / "s.nxs"
+    ih.nxem.write_focal_series(f, I, p, is_simulation=True)
+    a = App(work_dir=str(tmp_path / "w"))
+    a.load(str(f))
+    a.w_method.value = "tie_full"
+    a._run(block=True)
+    a.w_method.value = "frwr"
+    a.w_iter.value = 2
+    a._run(block=True)
+    assert [s["key"] for s in a.workflow_log] == ["load", "reconstruct", "reconstruct"]
+    a.w_placeholder.value = True
+    a.w_validate.value = False
+    a.w_fname.value = "res.nxs"
+    a._save()
+    out = tmp_path / "w" / "output"
+    names = sorted(x.name for x in out.iterdir())
+    assert names == ["res.archive.yaml", "res.nxs", "res.workflow.archive.yaml", "res_datasets.archive.yaml",
+                     "res_workflow.svg"]
+    me = yaml.safe_load((out / "res.archive.yaml").read_text())["data"]
+    assert me["m_def"] == eln.PLUGIN_SECTION and len(me["steps"]) == 4
+    assert [r["method"] for r in me["reconstructions"]] == ["tie_full", "frwr"] and me["nxem_file"] == "res.nxs"
+    wf = yaml.safe_load((out / "res.workflow.archive.yaml").read_text())["workflow2"]
+    assert [t["name"] for t in wf["tasks"]] == ["Load focal series", "Exit-wave reconstruction (tie_full)",
+                                                "Exit-wave reconstruction (frwr)", "Export NXem"]
+    # the reconstructions read the loaded series; the export reads both reconstructions and gives the outputs
+    load_out = wf["tasks"][0]["outputs"][0]["section"]
+    assert wf["tasks"][1]["inputs"][0]["section"] == load_out == wf["tasks"][2]["inputs"][0]["section"]
+    assert {x["section"] for x in wf["tasks"][3]["inputs"]} == {wf["tasks"][1]["outputs"][0]["section"],
+                                                                 wf["tasks"][2]["outputs"][0]["section"]}
+    assert {x["section"] for x in wf["outputs"]} <= {x["section"] for x in wf["tasks"][3]["outputs"]}
+    assert wf["inputs"][0]["section"] == wf["tasks"][0]["inputs"][0]["section"]
+    ds = yaml.safe_load((out / "res_datasets.archive.yaml").read_text())["data"]
+    assert ds["Files"][0]["file"] == "s.nxs"
+    import h5py
+    with h5py.File(out / "res.nxs") as h:
+        d = h["entry1/experiment_description"][()].decode()
+    assert "Exit-wave reconstruction" in d and "frwr" in d
+    assert "<svg" in a.w_wf_svg.value and "Export NXem" in a.w_wf_svg.value
+    # references with the folder of a NOMAD upload; the series goes along unless it is already in that upload
+    files = a.write_eln(str(out / "res.nxs"), ("U9", "results/run1"))
+    wf = yaml.safe_load((out / "res.workflow.archive.yaml").read_text())["workflow2"]
+    assert wf["outputs"][0]["section"] == "../upload/archive/mainfile/results/run1/res.nxs#/data"
+    assert str(f) in files
+    a.nomad_ctx = {"upload_id": "U9", "files": ["raw/s.nxs"]}
+    files = a.write_eln(str(out / "res.nxs"), ("U9", "results/run1"))
+    ds = yaml.safe_load((out / "res_datasets.archive.yaml").read_text())["data"]
+    assert ds["Files"][0]["file"] == "raw/s.nxs" and str(f) not in files
+
+
+def test_eln_archives_parse_in_nomad(tmp_path):
+    """The measurement ELN and the datasets archive are read by NOMAD with the plugin schema."""
+    pytest.importorskip("nomad.client")
+    from nomad.client import normalize_all, parse
+    from inlineholo import eln
+    log = eln.WorkflowLog()
+    log.add("load", dict(source="s.nxs", n_images=4, shape="64×64", pixel_size_nm=0.05, defocus_min_nm=-30,
+                         defocus_max_nm=30))
+    log.add("reconstruct", dict(method="frwr", n_iter=5), "frwr: 5 iterations.")
+    log.add("export", dict(file="res.nxs"))
+    paths = eln.write_eln(str(tmp_path), "res", log, ["s.nxs"], "res.nxs",
+                          settings={"acceleration_voltage": 300e3, "pixel_size": 0.05, "number_of_images": 4},
+                          reconstructions=[{"method": "frwr", "iterations": 5, "runtime": 1.0, "final_r_value": 0.1}])
+    a = parse(paths["res.archive.yaml"])[0]
+    normalize_all(a)
+    assert a.data.m_def.name == "ELNInlineHolography" and len(a.data.steps) == 3
+    assert a.data.settings.acceleration_voltage.to("kV").magnitude == pytest.approx(300)
+    a = parse(paths["res_datasets.archive.yaml"])[0]
+    assert a.data.Files[0].file == "s.nxs"

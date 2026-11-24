@@ -28,7 +28,7 @@ web = ["solara==1.58.2", "solara-assets==1.58.2"]
 # NXem validation and more input formats
 nexus = ["pynxtools>=0.16", "pynxtools-em>=0.4", "rosettasciio", "mrcfile"]
 # NOMAD plugin (dashboard + action); nomad-lab itself comes with the NOMAD installation
-nomad = ["solara==1.58.2", "solara-assets==1.58.2", "httpx", "websockets", "pynxtools>=0.16", "pynxtools-em>=0.4", "rosettasciio", "mrcfile"]
+nomad = ["solara==1.58.2", "solara-assets==1.58.2", "httpx", "websockets", "pynxtools>=0.16", "pynxtools-em>=0.4", "rosettasciio", "mrcfile", "nomad-measurements"]
 notebooks = ["jupyter", "voila", "nbformat", "pandas"]
 gpu = ["torch"]
 dev = ["pytest"]
@@ -40,6 +40,7 @@ Repository = "https://github.com/christophys/inlineHolo"
 inlineholo_dashboard = "inlineholo_nomad.dashboards:inlineholo_dashboard"
 inlineholo_reconstruction = "inlineholo_nomad.actions:inlineholo_reconstruction"
 inlineholo_batch = "inlineholo_nomad.actions:inlineholo_batch"
+inlineholo_schema = "inlineholo_nomad.schema_packages:inlineholo_schema"
 
 [tool.setuptools.dynamic]
 version = { attr = "inlineholo.__version__" }

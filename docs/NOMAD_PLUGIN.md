@@ -6,6 +6,7 @@ The repository is also a NOMAD plugin (package `inlineholo_nomad`, entry points 
 |---|---|---|
 | `inlineholo_nomad.dashboards:inlineholo_dashboard` | dashboard | the inline-holography app (the same GUI as the Voilà / Solara app) inside NOMAD, at `{api_base_path}/dashboards/inlineholo/` |
 | `inlineholo_nomad.actions:inlineholo_reconstruction` | action | reconstruction of a focal series of a NOMAD upload on a NOMAD worker; the NXem result is added to the upload |
+| `inlineholo_nomad.schema_packages:inlineholo_schema` | schema | ELN of an inline-holography measurement (`ELNInlineHolography`, a `Measurement` in the *NOMAD measurements* category of nomad-measurements), written by the app in tab 6 |
 | `inlineholo_nomad.actions:inlineholo_batch` | action | several series in parallel, coordinated by Temporal: alignment on CPU workers, optional approval, reconstruction on GPU workers (CPU fallback) |
 
 Both need the new NOMAD GUI and NOMAD ≥ 2.0 (dashboard and action entry points).
@@ -81,6 +82,33 @@ BatchReconstructWorkflow                                  (CPU queue; the action
 
 The workflow code (`inlineholo_nomad/workflows/`) does not import NOMAD at module level, as Temporal
 re-imports workflow modules in its sandbox; NOMAD is only used inside the activities (`backend.py`).
+
+## Loading data from your computer
+
+In the dashboard (and in the Solara app), tab 1 has a file chooser *From your computer*. The files are
+transferred in chunks over the app's websocket (2 MB messages, no size limit) into the session's private
+folder, with the file name, percentage, MB and MB/s shown below the chooser; then they are loaded as a focal
+series (one stack/NXem file, an indexed `.img` series, or several single images). In plain Jupyter/Voilà the
+ipywidgets upload button is used instead.
+
+## ELN entry and workflow for NOMAD
+
+The app records every processing step of a session (load, binning/crop, Thon-ring fit, drift correction, FRWR
+alignment, each reconstruction with its parameters and R value, strain, half-set FRC, DIH, export). When the
+results are written in tab 6 (option *also write a NOMAD ELN entry and the workflow*), next to the NXem file:
+
+| file | content |
+|---|---|
+| `<name>.nxs` | NXem results; the workflow description is part of `experiment_description` |
+| `<name>.archive.yaml` | measurement ELN `ELNInlineHolography` (this plugin; based on the NOMAD `Measurement` and the *NOMAD measurements* category of nomad-measurements): imaging settings, focal-series file(s), reconstructions, NXem file, the steps with their parameters, description of the workflow. Without the plugin in the target NOMAD tick *core NOMAD ELN* (`ELNMeasurement`). |
+| `<name>_datasets.archive.yaml` | `ElnFileManager` entry listing the focal-series file(s) |
+| `<name>.workflow.archive.yaml` | `workflow2`: focal series → steps → NXem results and ELN, connected by references to the entries above ([NOMAD workflows](https://docs.nomad-lab.eu/howto/manage/gui/workflows.html)) |
+| `<name>_workflow.svg` | the workflow graph as an image |
+
+The accordion *workflow of this session (preview)* in tab 6 draws the graph as NOMAD's workflow card shows it
+(inputs → tasks → outputs) and the description. When the files are uploaded to NOMAD (button or automatic push),
+the archives are written with the paths of the target upload folder; the focal series is uploaded along unless it
+was imported from the same upload (then the workflow refers to it where it is).
 
 ## How the dashboard works
 

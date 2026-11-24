@@ -14,6 +14,7 @@ focal-series reconstruction:
 from __future__ import annotations
 
 import base64
+import html
 import io
 import json
 import os
@@ -26,6 +27,34 @@ import numpy as np
 from IPython.display import display, HTML
 
 from . import ctffit, align, nxem
+from .eln import WorkflowLog
+
+
+def _md_to_html(md):
+    """Minimal markdown (headings, bold, inline code, numbered list) for the workflow description."""
+    import re
+    out, in_list = [], False
+    for line in md.splitlines():
+        t = html.escape(line)
+        t = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", t)
+        t = re.sub(r"`(.+?)`", r"<code style='font-size:11px'>\1</code>", t)
+        m = re.match(r"^(\d+)\. (.*)$", t)
+        if m:
+            if not in_list:
+                out.append("<ol style='margin:2px 0 2px 18px;padding:0'>")
+                in_list = True
+            out.append(f"<li>{m.group(2)}</li>")
+            continue
+        if in_list:
+            out.append("</ol>")
+            in_list = False
+        if t.startswith("## "):
+            out.append(f"<div style='font-weight:bold;margin-top:6px'>{t[3:]}</div>")
+        elif t.strip():
+            out.append(f"<div>{t}</div>")
+    if in_list:
+        out.append("</ol>")
+    return "<div style='font-size:12px;line-height:1.4'>" + "".join(out) + "</div>"
 from .app_dih import DIHTabMixin
 from .app_nomad import NomadMixin
 from .control import StopRequested
@@ -59,12 +88,16 @@ def _bin(stack, b):
 
 
 class App(DIHTabMixin, NomadMixin):
-    def __init__(self, data_dir=None, server_mode=False, work_dir=None):
+    def __init__(self, data_dir=None, server_mode=False, work_dir=None, streaming_upload=None):
         """data_dir: folder with example data (tab 1).  server_mode: the app is shared by several users on a
         server (NOMAD dashboard): no access to the server's file system except data_dir and work_dir; all
-        written files go to work_dir/output (work_dir: a private folder of this session, default: cwd)."""
+        written files go to work_dir/output (work_dir: a private folder of this session, default: cwd).
+        streaming_upload: browser uploads in chunks with progress (ipyvuetify FileInput, used by Solara; no size
+        limit) instead of the ipywidgets FileUpload (one message); default: on in server mode."""
         self.data_dir = data_dir
         self.server_mode = bool(server_mode)
+        self.streaming_upload = self.server_mode if streaming_upload is None else bool(streaming_upload)
+        self.workflow_log = WorkflowLog()   # processing steps of the session (ELN, workflow, NXem description)
         self.work_dir = os.path.abspath(work_dir or os.getcwd())
         self.raw = None          # stack as loaded
         self.stack = None        # working stack (binned/cropped/aligned)
@@ -86,9 +119,17 @@ class App(DIHTabMixin, NomadMixin):
     # ------------------------------------------------------------------ UI build
     def _build(self):
         # ---------- load tab
-        self.w_upload = W.FileUpload(accept=".nxs,.h5,.hdf5,.tif,.tiff,.dm3,.dm4,.img,.emd,.mrc,.st,.npy,.npz,.ser",
-                                     multiple=True, description="Upload file(s)",
-                                     layout=W.Layout(width="220px"))
+        self.w_upload_progress = W.HTML()
+        self.w_upload = None
+        if self.streaming_upload:
+            try:
+                from ipyvuetify.extra import FileInput
+                self.w_upload = FileInput(multiple=True, accept=",".join(self._EXT), show_progress=False)
+            except Exception:  # noqa: BLE001  -- ipyvuetify not available (plain Jupyter / Voila)
+                self.streaming_upload = False
+        if self.w_upload is None:
+            self.w_upload = W.FileUpload(accept=",".join(self._EXT), multiple=True, description="Upload file(s)",
+                                         layout=W.Layout(width="220px"))
         self.w_md_box = self._build_metadata_form()      # NXem metadata (shown in tabs 1 and 6)
         self.w_demo = W.Dropdown(options=self._data_files(), description="or file in data folder",
                                  style={"description_width": "150px"}, layout=W.Layout(width="520px"))
@@ -140,20 +181,26 @@ class App(DIHTabMixin, NomadMixin):
         self.w_apply_prep = W.Button(description="apply binning/crop", icon="crop")
         self.w_load_status = W.HTML()
         self.w_meta = W.Output(layout=W.Layout(max_height="300px", overflow="auto"))
-        self.w_upload.observe(self._on_upload, names="value")
+        if self.streaming_upload:
+            self.w_upload.observe(self._on_stream_files, names="file_info")
+        else:
+            self.w_upload.observe(self._on_upload, names="value")
         self.w_demo.observe(self._on_demo, names="value")
         self.w_apply_prep.on_click(lambda _: self._prepare())
         self._build_nomad()
         intro = ("<b>1. Load a focal series</b> — NXem/NeXus, TIFF stack or several single images (one per "
                  "defocus), DM3/DM4, FRWR3/QSTEM .img frames, EMD, MRC, NPY — ")
-        intro += ("from a NOMAD upload (recommended for large files) or from your computer (browser upload, limited "
-                  "by the message size of the web server)." if self.server_mode else
+        intro += ("from your computer (choose the file(s) below; they are transferred in chunks with progress) or "
+                  "from a NOMAD upload." if self.streaming_upload else
                   "from this computer, the data folder, or a NOMAD upload. Large files (e.g. 140 MB DM3 stacks) are "
                   "best loaded by path or from the data folder; browser uploads are limited by the web server's "
                   "message size.")
         tab_load = W.VBox([W.HTML(intro),
-                           W.HBox([self.w_upload] + ([self.w_demo] if len(self.w_demo.options) > 1
-                                                     or not self.server_mode else [])),
+                           (W.VBox([W.HBox([W.HTML("<b>From your computer:</b>", layout=W.Layout(width="150px")),
+                                            W.Box([self.w_upload], layout=W.Layout(width="460px"))]),
+                                    self.w_upload_progress]) if self.streaming_upload else
+                            W.HBox([self.w_upload, self.w_upload_progress])),
+                           *([self.w_demo] if len(self.w_demo.options) > 1 or not self.server_mode else []),
                            *([] if self.server_mode else [W.HBox([self.w_path, self.w_path_load]), self.w_browser]),
                            self.nomad_import_box(),
                            W.HBox([self.w_bin, self.w_crop, self.w_apply_prep]),
@@ -388,6 +435,22 @@ class App(DIHTabMixin, NomadMixin):
         self.w_placeholder = W.Checkbox(value=False, indent=False,
                                         description="write 'unknown' for missing required metadata", layout=W.Layout(width="auto"))
         self.w_validate = W.Checkbox(value=True, indent=False, description="validate with pynxtools after writing", layout=W.Layout(width="auto"))
+        self.w_eln = W.Checkbox(value=True, indent=False, layout=W.Layout(width="auto"),
+                                description="also write a NOMAD ELN entry and the workflow (archive files)")
+        self.w_eln_core = W.Checkbox(value=False, indent=False, layout=W.Layout(width="auto"),
+                                     description="core NOMAD ELN (if the inlineHolo plugin is not installed in "
+                                                 "the target NOMAD)")
+        self.w_wf_svg = W.HTML()
+        self.w_wf_desc = W.HTML()
+        self.w_wf_refresh = W.Button(description="preview workflow", icon="sitemap", layout=W.Layout(width="180px"))
+        self.w_wf_refresh.on_click(lambda _: self._show_workflow())
+        self.w_wf_box = W.Accordion(children=[W.VBox([
+            W.HTML("<small>The processing steps of this session as NOMAD will show them on the <i>workflow</i> card "
+                   "of the entry (inputs → tasks → outputs), and the description written into the ELN entry and into "
+                   "the NXem file.</small>"), self.w_wf_refresh,
+            W.Box([self.w_wf_svg], layout=W.Layout(overflow="auto", border="1px solid #ddd", padding="4px")),
+            self.w_wf_desc])], titles=("workflow of this session (preview)",))
+        self.w_wf_box.selected_index = None
         tab_exp = W.VBox([W.HTML("<b>6. Export</b> focal series (as used), parameters, all reconstructions of this "
                                  "session (exit waves, amplitude/phase, incoherent background, diffusion field, "
                                  "refined FRWR3 parameters, convergence), DIH strain maps and half-set FRC curves "
@@ -395,7 +458,8 @@ class App(DIHTabMixin, NomadMixin):
                                  "(pynxtools / pynxtools-em). Fields marked <b>*</b> are required by NXem."),
                           self.w_md_box,
                           W.HBox([self.w_derived, self.w_placeholder, self.w_validate]),
-                          W.HBox([self.w_fname, self.w_save]), self.w_save_out, self.nomad_export_box()])
+                          W.HBox([self.w_eln, self.w_eln_core]), W.HBox([self.w_fname, self.w_save]), self.w_save_out,
+                          self.w_wf_box, self.nomad_export_box()])
 
         self.tabs = W.Tab(children=[tab_load, tab_par, tab_thon, tab_align, tab_rec, tab_exp, tab_dih],
                           titles=("1 Load", "2 Parameters", "3 Thon rings", "4 Align/Pre-reconstruct",
@@ -671,6 +735,67 @@ class App(DIHTabMixin, NomadMixin):
         except Exception as e:  # noqa: BLE001
             self._status(self.w_load_status, f"could not read file: {e!r}", ok=False)
 
+    def _on_stream_files(self, change):
+        """Files chosen in the streaming upload (FileInput): copy them chunk by chunk into the session folder,
+        with progress (file name, %, MB), then load them as a focal series."""
+        info = change["new"] or []
+        if not info:
+            return
+        threading.Thread(target=self._stream_job, args=(list(info),), daemon=True).start()
+
+    def _stream_job(self, info, chunk=4 << 20):
+        files = self.w_upload.get_files(timeout=120)
+        total = sum(int(f["size"]) for f in info) or 1
+        done = 0
+        t0 = time.time()
+        d = os.path.join(self.work_dir, "uploads")
+        os.makedirs(d, exist_ok=True)
+        paths = []
+        try:
+            for k, f in enumerate(files):
+                name = os.path.basename(f["name"]) or f"upload_{k}"
+                size = int(f["size"])
+                dst = os.path.join(d, name)
+                got = 0
+                with open(dst, "wb") as fo:
+                    while got < size:
+                        b = f["file_obj"].read(min(chunk, size - got))
+                        if not b:
+                            break
+                        fo.write(b)
+                        got += len(b)
+                        done += len(b)
+                        rate = done / max(time.time() - t0, 1e-3) / 1e6
+                        self.w_upload_progress.value = (
+                            f"<span style='color:#1565c0'>⬆ uploading <b>{html.escape(name)}</b>"
+                            f"{f' ({k + 1} of {len(files)})' if len(files) > 1 else ''}: "
+                            f"{100 * got / max(size, 1):.0f} % ({got / 1e6:.1f} of {size / 1e6:.1f} MB, "
+                            f"{rate:.1f} MB/s)</span>"
+                            f"<progress value='{done}' max='{total}' style='width:300px;margin-left:8px'></progress>")
+                if got != size:
+                    raise IOError(f"transfer of {name} incomplete ({got} of {size} bytes)")
+                paths.append(dst)
+        except Exception as e:  # noqa: BLE001
+            self.w_upload_progress.value = f"<span style='color:crimson'>upload failed: {html.escape(repr(e))}</span>"
+            return
+        names = ", ".join(os.path.basename(p) for p in paths)
+        self.w_upload_progress.value = (f"<span style='color:green'>✔ uploaded {html.escape(names)} "
+                                        f"({total / 1e6:.1f} MB in {time.time() - t0:.0f} s) — loading ...</span>")
+        try:
+            if len(paths) == 1:
+                self.load(paths[0])
+                self.upload_files = paths
+            else:
+                items = [(open(p, "rb").read(), os.path.basename(p)) for p in paths]
+                stack, md = load_many(items)
+                self._set_data(stack, md, None, names, source_path=paths[0])
+                self.upload_files = paths
+            self.w_upload_progress.value = (f"<span style='color:green'>✔ uploaded and loaded {html.escape(names)} "
+                                            f"({total / 1e6:.1f} MB)</span>")
+        except Exception as e:  # noqa: BLE001
+            self.w_upload_progress.value = (f"<span style='color:crimson'>uploaded {html.escape(names)}, but it "
+                                            f"could not be read: {html.escape(repr(e))}</span>")
+
     def _on_demo(self, change):
         if change["new"]:
             stack, md, p = load_series(change["new"])
@@ -733,6 +858,8 @@ class App(DIHTabMixin, NomadMixin):
         self.align_info = None
         self.init_rec = None
         self.source_name = name
+        self.source_path = source_path
+        self.upload_files = []          # files of the series uploaded from the user's computer (server copies)
         kept = []
         ser = md.get("defocus_series")
         if ser:
@@ -824,6 +951,20 @@ class App(DIHTabMixin, NomadMixin):
             self.w_conv_name.value = base + ".nxs"
         else:
             self.tabs.selected_index = 1
+        p0 = self.params(all_images=True)
+        self.workflow_log = WorkflowLog()
+        self.workflow_log.add("load", dict(
+            source=str(name), file=os.path.basename(source_path) if source_path else str(name),
+            n_images=int(self.raw.shape[0]), shape=f"{self.raw.shape[1]}×{self.raw.shape[2]}",
+            pixel_size_nm=round(float(self.w_pix.value), 5), defocus_min_nm=round(float(np.min(p0.defoci_nm)), 2),
+            defocus_max_nm=round(float(np.max(p0.defoci_nm)), 2)))
+
+    def log_step(self, key, params=None, summary="", **kw):
+        """Record a processing step (workflow of the session: ELN, NOMAD workflow, NXem description)."""
+        try:
+            return self.workflow_log.add(key, params, summary, **kw)
+        except Exception:  # noqa: BLE001  -- logging must never break the app
+            return None
 
     def _prepare(self):
         if self.raw is None:
@@ -850,6 +991,9 @@ class App(DIHTabMixin, NomadMixin):
         self._update_q_ranges()
         self._status(self.w_load_status, f"working stack: {s.shape[0]} × {s.shape[1]} × {s.shape[2]} px "
                                          f"(binning {self.w_bin.value}, pixel size {self.w_pix.value:.4g} nm)")
+        if self.w_bin.value != 1 or self.w_crop.value:
+            self.log_step("prepare", dict(binning=int(self.w_bin.value), crop_px=int(self.w_crop.value or 0)),
+                          replace=True)
 
     # ------------------------------------------------------------------ Thon rings
     def _thon_params(self, i):
@@ -1032,6 +1176,9 @@ class App(DIHTabMixin, NomadMixin):
         self._status(self.w_thon_status, ("stopped: " if stopped else "done: ") +
                      f"{len(best[2])} image(s) fitted in {time.time() - t0:.0f} s"
                      + (" (last one: best values found so far)" if stopped else ""), ok=not stopped)
+        self.log_step("thon", dict(mode="per image", images=len(best[2]), fit_astigmatism=bool(self.w_fitastig.value),
+                                   fit_c3=bool(self.w_fitc3.value)),
+                      f"{len(best[2])} image(s) fitted" + (" (stopped)" if stopped else "") + ".")
         self._show_thon()
 
     def _fit_global(self, block=True):
@@ -1092,9 +1239,14 @@ class App(DIHTabMixin, NomadMixin):
         self._text_out(self.w_fit_out, "\n".join(lines) + "\n")
         self._status(self.w_thon_status, ("stopped — best parameters so far kept" if r["stopped"] else "series fit done")
                      + f" ({time.time() - t0:.0f} s)", ok=not r["stopped"])
+        self.log_step("thon", dict(mode="whole series", model=r.get("model", "linear"),
+                                   fit_astigmatism=bool(self.w_fitastig.value)),
+                      head.replace("\n", " ") + f", mean score {r['score']:.3f}.")
         self.fits = {}
 
     def _apply_fits(self):
+        if getattr(self, "_global_fit", None) is not None or self.fits:
+            self.log_step("thon_apply")
         if getattr(self, "_global_fit", None) is not None and not self.fits:
             r = self._global_fit
             for (u, d, a, b), c1 in zip(self.rows, r["defoci"]):
@@ -1132,6 +1284,8 @@ class App(DIHTabMixin, NomadMixin):
         out, sh = align.register_stack(self.stack, p.defoci_nm, sigma_hp=self.w_hp.value or None,
                                        sequential=self.w_seq.value)
         self.stack = out
+        self.log_step("drift", dict(high_pass_sigma=self.w_hp.value or None, sequential=bool(self.w_seq.value)),
+                      f"largest shift {float(np.abs(sh).max()):.1f} px.")
         with self.w_align_out:
             self.w_align_out.clear_output()
             fig, ax = plt.subplots(1, 2, figsize=(9, 3))
@@ -1282,6 +1436,12 @@ class App(DIHTabMixin, NomadMixin):
         rec.options.pop("callback", None)
         self.rec = rec
         self.recs.append((m, rec, p))
+        hist = [h for h in (rec.history or []) if np.isscalar(h)]
+        self.log_step("reconstruct", {**{k: v for k, v in rec.options.items() if np.isscalar(v) or v is None},
+                                      "method": m},
+                      f"{m}: " + (f"{len(rec.history)} iterations in " if rec.history else "")
+                      + f"{rec.runtime_s:.1f} s"
+                      + (f", final R = {hist[-1]:.4g}" if hist else "") + (" (stopped)" if stopped else "") + ".")
         if not stopped:
             self.w_prog.value = self.w_prog.max
         self._status(self.w_rec_status,
@@ -1337,6 +1497,7 @@ class App(DIHTabMixin, NomadMixin):
         src = self.recs[-1][0] if self.recs else "current reconstruction"
         self.maps.append(dict(kind="strain", array=e, g=(self.w_gx.value, self.w_gy.value),
                               sigma=self.w_ssig.value, source=src, params=self.params()))
+        self.log_step("strain", dict(g=[self.w_gx.value, self.w_gy.value], sigma_px=self.w_ssig.value, source=src))
         with self.w_strain_out:
             self.w_strain_out.clear_output(wait=True)
             fig, ax = plt.subplots(1, 2, figsize=(10, 3.6))
@@ -1371,6 +1532,7 @@ class App(DIHTabMixin, NomadMixin):
                           window=0.15)
             self.curves.append(dict(kind="half_set_frc", method=m, q=q, frc=f, threshold=half_bit_threshold(n),
                                     params=p))
+            self.log_step("halfset", dict(method=m))
             from matplotlib.figure import Figure
             fig = Figure(figsize=(5, 3))
             ax = fig.subplots()
@@ -1670,6 +1832,11 @@ class App(DIHTabMixin, NomadMixin):
                                        runtime, None, extra)
         self.recs = [r for r in self.recs if r[0] != "frwr_initial"] + [("frwr_initial", self.init_rec,
                                                                           self._init_params())]
+        rv = [r[2] for r in res.rvalues]
+        self.log_step("frwr_align", {**opts, "runtime_s": round(float(runtime), 1)},
+                      (f"final R = {rv[-1]:.4g}; " if rv else "")
+                      + f"largest drift {float(np.abs(np.asarray(info['shifts_px'], float)).max()):.1f} px.",
+                      replace=True)
         self.w_fa_save.disabled = self.w_fa_to5.disabled = False
         self.w_fa_save_out.value = ""
         base = os.path.splitext(os.path.basename(str(getattr(self, "source_name", "") or "series").split(",")[0]))[0]
@@ -1759,7 +1926,12 @@ class App(DIHTabMixin, NomadMixin):
     def save(self, path, metadata=None, derived=True, placeholders=True):
         """Write the session (focal series, all reconstructions, maps, curves) to an NXem file."""
         p = self.params()
-        meta = metadata or self.metadata()
+        meta = json.loads(json.dumps(metadata or self.metadata(), default=str))
+        self.log_step("export", dict(file=os.path.basename(path)), replace=True)
+        from .eln import workflow_description
+        wf_md = workflow_description(self.workflow_log)
+        ex = meta.setdefault("experiment", {})
+        ex["description"] = ((str(ex.get("description")).strip() + "\n\n") if ex.get("description") else "") + wf_md
         extra = {k: v for k, v in self.meta.items() if k != "raw"}
         if getattr(self, "align_info", None):
             extra["frwr3_alignment"] = self.align_info
@@ -1817,7 +1989,87 @@ class App(DIHTabMixin, NomadMixin):
         if miss:
             val += ("<br><span style='color:#b26a00'>written with 'unknown' for: "
                     + ", ".join(f"{s}/{lab}" for s, _, lab in miss) + "</span>")
+        self.last_nxem = path
+        eln_files, eln_msg = [], ""
+        if self.w_eln.value:
+            target = self._nomad_target() if self.w_nm_auto.value else None
+            try:
+                eln_files = self.write_eln(path, target)
+                eln_msg = ("<br>NOMAD ELN and workflow: " + ", ".join(
+                    f"<code>{os.path.basename(f)}</code>" for f in eln_files if f.endswith(".yaml")))
+            except Exception as e:  # noqa: BLE001
+                eln_msg = f"<br><span style='color:#b26a00'>ELN / workflow not written: {e!r}</span>"
         self.w_save_out.value = (f"written <code>{path}</code> ({size / 1e6:.1f} MB, {len(self.recs)} "
                                  f"reconstruction(s), {len(self.maps)} strain map(s), {len(self.curves)} "
-                                 f"FRC curve(s)) {link}{val}")
-        self._register_output(path)
+                                 f"FRC curve(s)) {link}{val}{eln_msg}")
+        self._show_workflow()
+        self._register_outputs([path] + eln_files)
+
+    # ------------------------------------------------------------------ ELN and workflow
+    def _eln_name(self, nxem_path):
+        return os.path.splitext(os.path.basename(nxem_path))[0]
+
+    def _input_files_for_eln(self, target=None):
+        """(paths of the focal series in the upload, local files to upload with the results).
+        target: (upload_id, folder) of the NOMAD upload the results go to, or None (local folder)."""
+        ctx = getattr(self, "nomad_ctx", None)
+        if ctx and target and ctx.get("upload_id") == target[0] and ctx.get("files"):
+            return list(ctx["files"]), []                       # the series is already in that upload
+        local = [f for f in (getattr(self, "upload_files", None) or []) if os.path.isfile(f)]
+        if not local and getattr(self, "source_path", None) and os.path.isfile(self.source_path):
+            local = [self.source_path]
+        pre = (target[1].strip("/") + "/") if target and target[1].strip("/") else ""
+        names = [pre + os.path.basename(f) for f in local] or [str(getattr(self, "source_name", "focal series"))]
+        return names, local
+
+    def _eln_settings(self):
+        p = self.params(all_images=True)
+        return {"acceleration_voltage": float(p.voltage_V), "pixel_size": float(self.w_pix.value),
+                "number_of_images": int(len(p.defoci_nm)), "defocus_min": float(np.min(p.defoci_nm)),
+                "defocus_max": float(np.max(p.defoci_nm)), "spherical_aberration": float(p.aberrations.get("c_3_0", 0)),
+                "focal_spread": float(p.focal_spread_nm), "convergence_semi_angle": float(p.convergence_rad * 1e3)}
+
+    def _eln_reconstructions(self):
+        out = []
+        for m, rec, _ in self.recs:
+            hist = [h for h in (rec.history or []) if np.isscalar(h)]
+            out.append({"method": m, "iterations": len(rec.history or []), "runtime": round(float(rec.runtime_s), 2),
+                        "final_r_value": float(hist[-1]) if hist else None})
+        return out
+
+    def write_eln(self, nxem_path, target=None):
+        """ELN entry, datasets and workflow archives (+ SVG preview) next to the NXem file.  target: (upload_id,
+        folder) of the NOMAD upload the files will go to (references are paths in that upload), or None.
+        Returns the files to upload with the NXem file (archives and, if needed, the focal series)."""
+        from . import eln
+        folder = os.path.dirname(os.path.abspath(nxem_path))
+        name = self._eln_name(nxem_path)
+        inputs, local = self._input_files_for_eln(target)
+        pre = (target[1].strip("/") + "/") if target and target[1].strip("/") else ""
+        hist = [h for _, rec, _ in self.recs[-1:] for h in (rec.history or []) if np.isscalar(h)]
+        summary = (f"{len(self.recs)} reconstruction(s): " + ", ".join(m for m, _, _ in self.recs)
+                   + (f"; last R = {hist[-1]:.4g}" if hist else "")) if self.recs else None
+        paths = eln.write_eln(folder, name, self.workflow_log, inputs, pre + os.path.basename(nxem_path), prefix=pre,
+                              schema="core" if self.w_eln_core.value else "plugin", settings=self._eln_settings(),
+                              metadata=self.metadata(), results_summary=summary,
+                              reconstructions=self._eln_reconstructions())
+        self.last_workflow = paths
+        files = [v for k, v in paths.items() if k != "svg"] + [paths["svg"]]
+        return files + [f for f in local if os.path.abspath(f) != os.path.abspath(nxem_path)]
+
+    def _nomad_target(self):
+        uid = self.w_nm_upload.value.strip()
+        return (uid, self.w_nm_results.value.strip().strip("/")) if uid else ("", self.w_nm_results.value.strip())
+
+    def _show_workflow(self):
+        """Preview of the workflow (as on NOMAD's workflow card) and of the description."""
+        from . import eln
+        name = self._eln_name(getattr(self, "last_nxem", None) or self.w_fname.value or "session")
+        log = eln.WorkflowLog(self.workflow_log)
+        if not any(st["key"] == "export" for st in log):
+            log.add("export", dict(file=self.w_fname.value))
+        inputs, _ = self._input_files_for_eln(None)
+        arch = eln.build_archives(name, log, inputs, os.path.basename(self.w_fname.value or name + ".nxs"))
+        wf = arch[f"{name}.workflow.archive.yaml"]["workflow2"]
+        self.w_wf_svg.value = eln.workflow_svg(wf)
+        self.w_wf_desc.value = _md_to_html(eln.workflow_description(log))

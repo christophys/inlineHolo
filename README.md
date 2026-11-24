@@ -19,6 +19,9 @@ and exporting FAIR data in the NeXus/**NXem** format.
 * **Data** – NXem/NeXus, DM3/DM4 (with FRWR tags), FRWR3/QSTEM `.img` series, TIFF, EMD, MRC, NPY;
   NXem export validated with `pynxtools`; import from and upload to **NOMAD**.
 * Long computations run in the background with progress, remaining time and a stop button.
+* **NOMAD ELN and workflow** – every session's processing steps are written as a NOMAD measurement ELN
+  (nomad-measurements), a `workflow2` graph (focal series → steps → results) and a description in the NXem file;
+  tab 6 previews the graph as NOMAD shows it.
 * **NOMAD plugin** – the app as a NOMAD **dashboard** (with the user's NOMAD login) and the reconstruction as a
   NOMAD **action** on a worker, results added to the upload as NXem; a **batch action** spreads many series
   over CPU (alignment) and GPU (reconstruction) workers via NOMAD's Temporal workflow engine

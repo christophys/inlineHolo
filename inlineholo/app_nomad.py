@@ -223,6 +223,17 @@ class NomadMixin:
             threading.Thread(target=job, daemon=True).start()
 
     # ------------------------------------------------------------------ export
+    def _register_outputs(self, paths):
+        """Remember several written files (NXem + ELN + workflow, ...) and push them together if automatic push
+        is on."""
+        paths = [os.path.abspath(p) for p in paths if p]
+        for p in paths:
+            if p not in self.generated_files:
+                self.generated_files.append(p)
+        self._nm_files_html()
+        if paths and self.w_nm_auto.value and self.w_nm_upload.value.strip():
+            self._nm_push(paths, block=getattr(self, "_nm_block", False), auto=True)
+
     def _register_output(self, path):
         """Remember a written file for the NOMAD export; push it right away if automatic push is on."""
         if not path:
@@ -241,9 +252,19 @@ class NomadMixin:
             + "</small>")
 
     def _nm_push(self, files=None, block=True, auto=False):
+        manual = files is None
         files = [f for f in (files or self.generated_files) if os.path.isfile(f)]
         uid = self.w_nm_upload.value.strip()
         folder = self.w_nm_results.value.strip().strip("/")
+        last = getattr(self, "last_nxem", None)
+        if manual and last and os.path.abspath(last) in files and getattr(self, "w_eln", None) is not None \
+                and self.w_eln.value and hasattr(self, "write_eln"):
+            # ELN and workflow with the references of the target upload / folder (+ the focal series if needed)
+            try:
+                extra = self.write_eln(last, (uid, folder))
+                files += [f for f in extra if os.path.abspath(f) not in files]
+            except Exception as e:  # noqa: BLE001
+                self._nm_msg(self.w_nm_status6, f"ELN / workflow not written: {e!r}", ok=False)
         if not files:
             self._nm_msg(self.w_nm_status6, "no files written yet (save in tab 6, 4b or convert in tab 1)", ok=False)
             return None

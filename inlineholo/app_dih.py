@@ -372,6 +372,10 @@ class DIHTabMixin:
         res["mode"] = self.w_dih_mode.value
         res["settings"] = {k: (list(v) if isinstance(v, tuple) else v) for k, v in kw.items()}
         self.dih_result = res
+        if hasattr(self, "log_step"):
+            self.log_step("dih", dict(mode=res["mode"], reflections=[str(r.hkl) for r in used],
+                                      **{k: v for k, v in res["settings"].items() if not hasattr(v, "shape")}),
+                          replace=True)
         self._dih_show(res)
         self._dih_to_export(res)
         n = len(used)
