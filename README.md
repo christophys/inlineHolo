@@ -57,7 +57,7 @@ In NOMAD (e.g. [nomad-distro-dev](https://github.com/FAIRmat-NFDI/nomad-distro-d
 
 ```bash
 git submodule add https://github.com/christophys/inlineHolo.git packages/inlineHolo
-uv add "./packages/inlineHolo[nomad]" && uv sync
+uv add packages/inlineHolo --extra nomad
 uv run poe start        # dashboard: http://localhost:8000/nomad-oasis/dashboards/inlineholo/
 uv run poe cpuworker    # runs the actions (single series, batch)
 uv run poe gpuworker    # optional: GPU reconstructions of the batch action

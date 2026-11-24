@@ -35,7 +35,8 @@ from .optics import ABERRATION_NAMES, wavelength_nm
 from .params import ImagingParameters
 from .reconstruct import METHODS, reconstruct
 
-LAYOUT_LABEL = W.Layout(width="190px")
+def LAYOUT_LABEL():  # noqa: N802  -- a new Layout widget per use (shared widgets break multi-user servers)
+    return W.Layout(width="190px")
 STYLE = {"description_width": "190px"}
 
 

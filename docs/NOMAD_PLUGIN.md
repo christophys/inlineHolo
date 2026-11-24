@@ -15,7 +15,7 @@ Both need the new NOMAD GUI and NOMAD ≥ 2.0 (dashboard and action entry points
 ```bash
 cd nomad-distro-dev
 git submodule add https://github.com/christophys/inlineHolo.git packages/inlineHolo
-uv add "./packages/inlineHolo[nomad]"      # or: uv add packages/inlineHolo  plus  uv pip install solara solara-assets
+uv add packages/inlineHolo --extra nomad   # with fit4DSTEM: uv add packages/inlineHolo packages/fit4DSTEM --extra nomad
 uv sync
 docker compose up -d                       # infrastructure (MongoDB, Elasticsearch, Temporal, ...)
 uv run poe setup                           # first time only
@@ -84,10 +84,13 @@ re-imports workflow modules in its sandbox; NOMAD is only used inside the activi
 
 ## How the dashboard works
 
-NOMAD calls `load()` of the dashboard entry point once at start-up and mounts the returned FastAPI app. That
-app is the **Solara** server of the app (`inlineholo_nomad/dashboards/server.py`); Solara renders the
-ipywidgets GUI of `inlineholo.app.App` in the browser and keeps one App per browser session in the NOMAD app
-process (`inlineholo_nomad/dashboards/page.py`):
+NOMAD calls `load()` of the dashboard entry point once at start-up and mounts the returned FastAPI app
+(`inlineholo_nomad/dashboards/server.py`). `load()` starts the **Solara** server of the app as a child process of
+the NOMAD app (uvicorn on 127.0.0.1, a free port), and the mounted FastAPI app forwards pages, assets and
+websockets to it (`solara_proxy.py`). Solara renders the ipywidgets GUI of `inlineholo.app.App` in the browser
+and keeps one App per browser session (`inlineholo_nomad/dashboards/page.py`). Because Solara has global state
+per process, the child process is what allows several Solara dashboards (e.g. inlineHolo and fit4DSTEM) in one
+NOMAD; it also keeps the computations out of the NOMAD API process. The child ends with the NOMAD app.
 
 * **NOMAD login:** the browser sends the `Authorization` cookie of the NOMAD GUI to the dashboard (same origin).
   The page uses it for the NOMAD import (tab 1) and export (tab 6): *this NOMAD* is preselected, the uploads of
@@ -96,13 +99,13 @@ process (`inlineholo_nomad/dashboards/page.py`):
 * **Server mode:** the app cannot read or write the server's files (no local path / file browser in tabs 1
   and 7); each session has its own working folder, deleted when the session ends; data come from NOMAD
   uploads or browser uploads.
-* **Computations** of the dashboard run in threads of the NOMAD app process (as in the stand-alone app, with
+* **Computations** of the dashboard run in threads of the Solara child process (as in the stand-alone app, with
   progress and stop buttons). Long reconstructions are better sent to a worker with the action.
 
 ### Limits and options
 
-* Solara keeps the session state in the process that served the page: the NOMAD app must run with **one
-  FastAPI worker** (as `uv run poe start` / `nomad admin run appworker --dev` does) or behind a proxy with
+* Every NOMAD app worker process starts its own Solara child, and a session lives in one of them: the NOMAD
+  app must run with **one FastAPI worker** (as `uv run poe start` / `nomad admin run appworker --dev` does) or behind a proxy with
   sticky sessions.
 * For production Oases with several app workers, run the app separately (the container of
   `galaxy/Dockerfile`) and set `INLINEHOLO_DASHBOARD_URL` in the environment of the NOMAD app: the dashboard
@@ -130,5 +133,5 @@ and local folders as uploads: alignment on CPU + reconstruction on the GPU queue
 worker, approval of a subset, cancellation of a running reconstruction, and the single-series action.
 
 `tests/test_nomad_plugin.py` covers the headless pipeline, the action activity (with a stand-in for the upload
-files), the dashboard page against a mock NOMAD API and the Solara server mounted in FastAPI; the tests that
+files), the dashboard page against a mock NOMAD API and the Solara child process behind the proxy mounted in FastAPI; the tests that
 need `temporalio`, `fastapi` or `solara` are skipped when these are missing.

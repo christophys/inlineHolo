@@ -175,6 +175,11 @@ def test_dashboard_server_mounted(tmp_path, monkeypatch):
     outer = FastAPI()                                  # as NOMAD mounts it
     outer.mount("/nomad-oasis/dashboards/inlineholo", create_app())
     cl = TestClient(outer)
+    import time
+    for _ in range(240):                               # the Solara child process starts
+        if cl.get("/nomad-oasis/dashboards/inlineholo/healthz").json()["status"] == "ok":
+            break
+        time.sleep(0.5)
     assert cl.get("/nomad-oasis/dashboards/inlineholo/healthz").json()["status"] == "ok"
     r = cl.get("/nomad-oasis/dashboards/inlineholo/")
     assert r.status_code == 200 and "solara" in r.text.lower()
