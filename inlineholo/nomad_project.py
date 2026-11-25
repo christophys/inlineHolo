@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright (c) 2026 Christoph T. Koch
-"""Shared helpers of the NOMAD dashboards (same file in inlineHolo, fit4DSTEM and temIngest):
+"""Shared helpers of the NOMAD dashboards (same file in inlineHolo, fit4DSTEM and EMingest):
 
 * :func:`upload_button` -- the chunked file transfer of ipyvuetify (``FileInput``) with a visible "Upload" label
   next to the paperclip;
