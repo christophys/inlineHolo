@@ -103,10 +103,11 @@ class NomadSession:
         a.w_nm_url.value = "custom"
         a.w_nm_custom.value = self.url
         a.w_nm_token.value = self.token
-        name = self.user.get("name") or self.user.get("username") or self.user.get("user_id", "")
-        self.w_banner.value = (f"<small>Signed in to NOMAD as <b>{name}</b> ({self.url}). Import a focal series "
-                               f"from one of your uploads in tab 1; results go back in tab 6, or run the "
-                               f"reconstruction on a NOMAD worker in tab 5.</small>")
+        self.w_banner.value = ""          # signed in: nothing to show above the title
+        try:
+            a.project.connect(self.url, self.token)
+        except Exception:  # noqa: BLE001
+            pass
         try:
             a._nm_list_uploads()
         except Exception:  # noqa: BLE001

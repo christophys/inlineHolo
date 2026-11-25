@@ -102,8 +102,11 @@ class MockNomad:
                 return self._send(400, {"detail": "unknown"})
 
             def _extract(self, uid, folder):
-                n = int(self.headers.get("Content-Length", 0))
-                z = zipfile.ZipFile(io.BytesIO(self.rfile.read(n)))
+                n = int(self.headers.get("Content-Length", 0) or 0)
+                body = self.rfile.read(n) if n else b""
+                if not body:                        # empty upload (POST /uploads without a file)
+                    return
+                z = zipfile.ZipFile(io.BytesIO(body))
                 for it in z.infolist():
                     name = (folder + "/" + it.filename) if folder else it.filename
                     mock.uploads[uid][name.strip("/")] = z.read(it)

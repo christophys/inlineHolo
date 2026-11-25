@@ -122,10 +122,9 @@ class App(DIHTabMixin, NomadMixin):
         self.w_upload_progress = W.HTML()
         self.w_upload = None
         if self.streaming_upload:
-            try:
-                from ipyvuetify.extra import FileInput
-                self.w_upload = FileInput(multiple=True, accept=",".join(self._EXT), show_progress=False)
-            except Exception:  # noqa: BLE001  -- ipyvuetify not available (plain Jupyter / Voila)
+            from .nomad_project import upload_button
+            self.w_upload = upload_button(accept=",".join(self._EXT), label="Upload focal series file(s)")
+            if self.w_upload is None:                # ipyvuetify not available (plain Jupyter / Voila)
                 self.streaming_upload = False
         if self.w_upload is None:
             self.w_upload = W.FileUpload(accept=",".join(self._EXT), multiple=True, description="Upload file(s)",
@@ -188,6 +187,8 @@ class App(DIHTabMixin, NomadMixin):
         self.w_demo.observe(self._on_demo, names="value")
         self.w_apply_prep.on_click(lambda _: self._prepare())
         self._build_nomad()
+        from .nomad_project import ProjectPicker
+        self.project = ProjectPicker(folder="focal_series", on_change=self._project_changed)
         intro = ("<b>1. Load a focal series</b> — NXem/NeXus, TIFF stack or several single images (one per "
                  "defocus), DM3/DM4, FRWR3/QSTEM .img frames, EMD, MRC, NPY — ")
         intro += ("from your computer (choose the file(s) below; they are transferred in chunks with progress) or "
@@ -196,8 +197,9 @@ class App(DIHTabMixin, NomadMixin):
                   "best loaded by path or from the data folder; browser uploads are limited by the web server's "
                   "message size.")
         tab_load = W.VBox([W.HTML(intro),
-                           (W.VBox([W.HBox([W.HTML("<b>From your computer:</b>", layout=W.Layout(width="150px")),
-                                            W.Box([self.w_upload], layout=W.Layout(width="460px"))]),
+                           (W.VBox([self.project.box,
+                                    W.HBox([W.HTML("<b>From your computer:</b>", layout=W.Layout(width="150px")),
+                                            W.Box([self.w_upload], layout=W.Layout(width="400px"))]),
                                     self.w_upload_progress]) if self.streaming_upload else
                             W.HBox([self.w_upload, self.w_upload_progress])),
                            *([self.w_demo] if len(self.w_demo.options) > 1 or not self.server_mode else []),
@@ -743,6 +745,44 @@ class App(DIHTabMixin, NomadMixin):
             return
         threading.Thread(target=self._stream_job, args=(list(info),), daemon=True).start()
 
+    def _project_changed(self, upload_id):
+        """The chosen NOMAD project is also where the results go (tabs 5 and 6)."""
+        if upload_id:
+            self.w_nm_upload.value = upload_id
+            self.w_nm_auto.value = True
+
+    def _store_in_project(self, paths, w):
+        """Put the uploaded files into the chosen NOMAD project (new one created if chosen); results then go there
+        too.  Returns the result of ProjectPicker.store or None."""
+        if not self.project.connected or not paths:
+            return None
+        t0 = time.time()
+
+        def prog(sent, size):
+            w.value = (f"<span style='color:#1565c0'>storing in the NOMAD project: {100 * sent / max(size, 1):.0f} % "
+                       f"({sent / 1e6:.1f} of {size / 1e6:.1f} MB, {sent / max(time.time() - t0, 1e-3) / 1e6:.1f} "
+                       f"MB/s)</span>")
+        try:
+            r = self.project.store(paths, progress=prog, tmp_dir=self.work_dir,
+                                   default_name=os.path.splitext(os.path.basename(paths[0]))[0])
+        except Exception as e:  # noqa: BLE001
+            self._project_error = str(e)
+            return None
+        self._project_error = ""
+        if r:
+            self._project_changed(r["upload_id"])
+        return r
+
+    def _stored_html(self, r):
+        err = getattr(self, "_project_error", "")
+        if err:
+            return f"<br><span style='color:crimson'>not stored in NOMAD: {html.escape(err)}</span>"
+        if not r:
+            return ""
+        return (f"<br><span style='color:green'>stored in NOMAD project <a href='{r['gui_url']}' target='_blank' "
+                f"rel='noopener'>{html.escape(r['upload_id'])}</a>/{html.escape(r['folder'])}; the results go "
+                f"there too</span>")
+
     def _stream_job(self, info, chunk=4 << 20):
         files = self.w_upload.get_files(timeout=120)
         total = sum(int(f["size"]) for f in info) or 1
@@ -781,6 +821,7 @@ class App(DIHTabMixin, NomadMixin):
         names = ", ".join(os.path.basename(p) for p in paths)
         self.w_upload_progress.value = (f"<span style='color:green'>✔ uploaded {html.escape(names)} "
                                         f"({total / 1e6:.1f} MB in {time.time() - t0:.0f} s) — loading ...</span>")
+        stored = self._store_in_project(paths, self.w_upload_progress)
         try:
             if len(paths) == 1:
                 self.load(paths[0])
@@ -790,8 +831,11 @@ class App(DIHTabMixin, NomadMixin):
                 stack, md = load_many(items)
                 self._set_data(stack, md, None, names, source_path=paths[0])
                 self.upload_files = paths
+            if stored is not None:
+                self.nomad_ctx = {"url": stored["url"], "upload_id": stored["upload_id"], "path": stored["folder"],
+                                  "files": stored["paths"]}
             self.w_upload_progress.value = (f"<span style='color:green'>✔ uploaded and loaded {html.escape(names)} "
-                                            f"({total / 1e6:.1f} MB)</span>")
+                                            f"({total / 1e6:.1f} MB)</span>" + self._stored_html(stored))
         except Exception as e:  # noqa: BLE001
             self.w_upload_progress.value = (f"<span style='color:crimson'>uploaded {html.escape(names)}, but it "
                                             f"could not be read: {html.escape(repr(e))}</span>")

@@ -125,8 +125,26 @@ def test_dashboard_page_session(mock, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     a, s = make_app({"Authorization": "Bearer " + TOKEN}, {}, "/nomad-oasis/dashboards/inlineholo",
                     work_dir=str(tmp_path / "w"))
-    assert s.connect() and "Ada Lovelace" in s.w_banner.value
+    assert s.connect() and s.w_banner.value == ""          # signed in: no line above the title
     assert a.w_nm_url.value == "custom" and a.w_nm_custom.value == mock.url and a.w_nm_upload.value == "U1"
+    # NOMAD project for uploaded files: new project (limit not reached) or an existing one
+    from inlineholo.nomad_project import NEW
+    assert a.project.box.layout.display == "flex" and a.project.w_sel.value == NEW
+    assert [v for _l, v in a.project.w_sel.options][1] == "U1"
+    f = tmp_path / "series.tif"
+    f.write_bytes(b"II*\x00 not really a tiff")
+    a.project.w_name.value = "my focal series"
+    r = a._store_in_project([str(f)], a.w_upload_progress)
+    assert r, getattr(a, "_project_error", "no error")
+    uid = r["upload_id"]
+    assert uid != "U1" and mock.names[uid] == "my focal series" and "focal_series/series.tif" in mock.uploads[uid]
+    assert a.w_nm_upload.value == uid and a.w_nm_auto.value and a.project.w_sel.value == uid
+    assert "stored in NOMAD project" in a._stored_html(r)
+    a.project.limit = a.project.n_open                    # limit of open projects reached: no new project
+    a.project.refresh()
+    assert NEW not in [v for _l, v in a.project.w_sel.options] and "maximum is reached" in a.project.w_info.value
+    a.project.w_sel.value = "U1"
+    assert a.w_nm_upload.value == "U1"
     # server mode: no access to the server's files
     a._load_path("/etc/hostname")
     assert "not possible" in a.w_load_status.value and a._find_local("x", 1) is None

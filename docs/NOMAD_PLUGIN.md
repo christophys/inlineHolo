@@ -46,6 +46,14 @@ uv run poe gpuworker                       # optional, on a machine with a GPU: 
 *The dashboard served by the NOMAD app (`/nomad-oasis/dashboards/inlineholo/`): signed in with the NOMAD login,
 focal series imported from an upload, reconstruction started on a NOMAD worker (tab 5).*
 
+### Files uploaded in the dashboard are stored in a NOMAD project
+
+Above the upload field (tab 1) the dashboard asks for the **NOMAD project** (upload) of the NOMAD the user is
+signed in to: **new project** (offered as long as the user has fewer unpublished uploads than the limit of that NOMAD,
+`services.upload_limit`, 10 by default; the count is shown) or one of the user's unpublished uploads, plus the
+folder. The uploaded files are stored there right after the transfer, and the results of the session go into the
+same project. "Keep only in this session" stores nothing.
+
 ## Batch action: several workers coordinated by Temporal
 
 NOMAD actions are Temporal workflows. The batch action uses this to spread the work over the workers:
