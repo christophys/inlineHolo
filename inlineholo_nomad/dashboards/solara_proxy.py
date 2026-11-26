@@ -11,14 +11,20 @@ a child process, and the FastAPI app returned to NOMAD forwards HTTP requests an
   (Solara's root path, so that the page loads its assets through NOMAD);
 * ``Host``, ``Cookie`` (the NOMAD login) and the other request headers are forwarded, plus
   ``x-forwarded-host``/``x-forwarded-proto``;
-* the child process ends with the NOMAD process (atexit and, on Linux, the parent-death signal).
+* the child process ends with the NOMAD process (atexit and, on Linux, the parent-death signal);
+* when NOMAD runs several worker processes (gunicorn ``--workers N``, as in the Oasis images), they share
+  one Solara server: the first process that gets the lock file ``<tmp>/solara-<name>-<uid>-<group>.lock``
+  (group: same parent process and Python environment) starts it
+  and writes its port next to it, the others forward to that port (a browser session must always reach the
+  same Solara server, whichever worker serves a request).  If that process ends, another one takes over.
 
 The heavy computations of the app therefore run in a separate process and do not slow down the NOMAD API.
-This file is identical in the inlineHolo and fit4DSTEM plugins.
+This file is identical in the inlineHolo, fit4DSTEM and EMingest plugins.
 """
 import asyncio
 import atexit
 import os
+import tempfile
 import signal
 import socket
 import subprocess
@@ -61,27 +67,92 @@ def solara_env(page, extra=None):
 
 
 class SolaraProcess:
-    """The Solara server of one app as a child process."""
+    """The Solara server of one app as a child process, shared by the worker processes of NOMAD."""
 
-    def __init__(self, page, name="solara", env=None, port=None):
+    def __init__(self, page, name="solara", env=None, port=None, shared=True):
         self.page, self.name = page, name
         self.env = solara_env(page, env)
         self.port = port or _free_port()
         self.proc = None
+        self.owner = False
+        self.restarts = 0
+        self._lock = None
+        # one shared server per group of worker processes (same parent, i.e. the gunicorn master, and same
+        # Python environment); other NOMAD installations on the same computer get their own
+        import hashlib
+        group = hashlib.sha1(f"{sys.prefix}|{os.getppid()}".encode()).hexdigest()[:10]
+        uid = os.getuid() if hasattr(os, "getuid") else 0
+        self.lock_path = (os.path.join(tempfile.gettempdir(), f"solara-{name}-{uid}-{group}.lock") if shared
+                          else None)
 
     @property
     def url(self):
         return f"http://127.0.0.1:{self.port}"
 
+    def _try_lock(self):
+        """True if this process now owns the shared server (lock file acquired)."""
+        if self.lock_path is None or self._lock is not None:
+            return True
+        try:
+            import fcntl
+        except ImportError:                       # (Windows: no sharing)
+            return True
+        fd = os.open(self.lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            os.close(fd)
+            return False
+        self._lock = fd                           # kept open (and locked) while this process lives
+        return True
+
+    def _read_port(self, timeout=30.0):
+        t_end = time.time() + timeout
+        while time.time() < t_end:
+            try:
+                with open(self.lock_path + ".port") as f:
+                    return int(f.read().strip())
+            except (OSError, ValueError):
+                time.sleep(0.1)
+        return None
+
     def start(self):
         if self.proc is not None and self.proc.poll() is None:
             return self
+        if not self.owner and not self._try_lock():   # another worker process runs the server
+            port = self._read_port()
+            if port:
+                self.port = port
+                return self
+            if not self._try_lock():
+                return self
+        self.owner = True
+        if self.lock_path:
+            self.port = _free_port()
         cmd = [sys.executable, "-m", "uvicorn", "solara.server.starlette:app", "--host", "127.0.0.1",
                "--port", str(self.port), "--log-level", "warning", "--ws-max-size", str(256 * 2 ** 20)]
         kw = {"preexec_fn": _die_with_parent} if sys.platform.startswith("linux") else {}
         self.proc = subprocess.Popen(cmd, env=self.env, **kw)
+        if self.lock_path:
+            tmp = self.lock_path + f".port.{os.getpid()}"
+            with open(tmp, "w") as f:
+                f.write(str(self.port))
+            os.replace(tmp, self.lock_path + ".port")
         atexit.register(self.stop)
         return self
+
+    def takeover(self):
+        """The shared server is gone (its process ended): start it here if no other process did."""
+        if self.owner or self.lock_path is None:
+            return False
+        if self._try_lock():
+            self.start()
+            return True
+        port = self._read_port(1.0)
+        if port and port != self.port:
+            self.port = port
+            return True
+        return False
 
     def stop(self):
         if self.proc is not None and self.proc.poll() is None:
@@ -104,7 +175,13 @@ class SolaraProcess:
             except Exception:  # noqa: BLE001
                 pass
             if self.proc is not None and self.proc.poll() is not None:
-                raise RuntimeError(f"{self.name}: the Solara server ended (exit code {self.proc.returncode})")
+                if self.restarts >= 5:
+                    raise RuntimeError(f"{self.name}: the Solara server ended (exit code {self.proc.returncode})")
+                self.restarts += 1                # crashed or killed: start it again
+                self.proc = None
+                self.start()
+            if not self.owner:
+                self.takeover()
             if time.time() >= t_end:
                 return False
             time.sleep(0.25)
@@ -120,8 +197,9 @@ def proxy_app(child: SolaraProcess, title="dashboard", extra_routes=None, start_
     state = {"client": None}
 
     def client():
-        if state["client"] is None:
+        if state["client"] is None or state.get("port") != child.port:      # (port changes after a takeover)
             state["client"] = httpx.AsyncClient(base_url=child.url, timeout=httpx.Timeout(300.0, connect=10.0))
+            state["port"] = child.port
         return state["client"]
 
     async def wait_ready():
